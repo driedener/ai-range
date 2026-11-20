@@ -1,0 +1,10 @@
+---
+# Installs the Elastic CA (/certs/ca/ca.crt on the controller) into the
+# system trust store so Elastic Agent trusts Fleet/ES via the controller IP.
+- name: CA (Windows)
+  ansible.builtin.include_tasks: windows.yml
+  when: "'windows' in group_names"
+
+- name: CA (Linux)
+  ansible.builtin.include_tasks: linux.yml
+  when: "'linux' in group_names"

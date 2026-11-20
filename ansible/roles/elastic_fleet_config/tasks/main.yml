@@ -1,0 +1,50 @@
+---
+# All API calls go through ansible.builtin.uri with shared defaults
+# (basic auth as elastic, own CA). import_tasks (static) so the block's
+# module_defaults are reliably inherited by all tasks.
+- name: Elastic configuration
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ elastic_user }}"
+      url_password: "{{ elastic_password }}"
+      force_basic_auth: true
+      ca_path: "{{ range_ca_cert }}"
+      validate_certs: true
+      return_content: true
+      timeout: 60
+  vars:
+    kbn_headers:
+      kbn-xsrf: "true"
+    kbn_headers_versioned:
+      kbn-xsrf: "true"
+      elastic-api-version: "{{ kibana_api_version }}"
+  block:
+    - name: Preflight
+      ansible.builtin.import_tasks: preflight.yml
+      tags: [always]
+
+    - name: ILM policies
+      ansible.builtin.import_tasks: ilm.yml
+      tags: [ilm, indices]
+
+    - name: Range indices (ground truth, agent traces)
+      ansible.builtin.import_tasks: indices.yml
+      tags: [indices]
+
+    - name: Roles and users
+      ansible.builtin.import_tasks: security.yml
+      tags: [security]
+
+    - name: Elastic Defend
+      ansible.builtin.import_tasks: defend.yml
+      when: defend_enabled | bool
+      tags: [defend]
+
+    - name: Extra integrations (IIS …)
+      ansible.builtin.import_tasks: integrations.yml
+      tags: [integrations]
+
+    - name: Prebuilt Detection Rules
+      ansible.builtin.import_tasks: rules.yml
+      when: rules_enabled | bool
+      tags: [rules]

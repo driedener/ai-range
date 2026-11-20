@@ -1,0 +1,17 @@
+---
+# Elastic configuration as code (Fleet/Defend, detection rules, range indices,
+# roles/users, ILM). Runs in the tools container against Kibana/ES on the Compose network.
+#
+# Run from docker/:
+#   docker compose --env-file .env run --rm tools sh -c \
+#     "cd ansible && ansible-playbook playbooks/elastic-config.yml"
+#
+# Individual steps via tag: defend, rules, indices, ilm, security
+- name: Configure Elastic Stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    # Relative path so the playbook also runs without ansible.cfg (roles_path)
+    # – otherwise Ansible only looks in playbooks/roles.
+    - role: ../roles/elastic_fleet_config

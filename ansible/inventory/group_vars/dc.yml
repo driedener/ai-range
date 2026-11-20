@@ -1,0 +1,12 @@
+---
+# Domain controller (DC01): after promotion "Administrator" is the
+# domain administrator (RANGE\Administrator); the connection stays the same.
+
+# DNS client of the DC: own IP first, then loopback
+ad_forest_dns_client_servers:
+  - "{{ range_dc_ip }}"
+  - 127.0.0.1
+
+# 5145: which file on SYSVOL/NETLOGON was read (GPP password hunting)
+win_base_audit_policy_extra:
+  - { subcategory: Detailed File Share, audit_type: [success, failure] }

@@ -1,0 +1,50 @@
+---
+- name: Update package sources
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install attack tools
+  ansible.builtin.apt:
+    name: "{{ kali_packages }}"
+    state: present
+
+- name: Unpack rockyou (wordlist for cracking hashes)
+  ansible.builtin.command: gunzip -k /usr/share/wordlists/rockyou.txt.gz
+  args:
+    creates: /usr/share/wordlists/rockyou.txt
+
+- name: Check tools in PATH
+  ansible.builtin.command: "which {{ item }}"
+  loop: "{{ kali_required_commands }}"
+  changed_when: false
+
+- name: Egress guard (nftables)
+  when: kali_guard_enabled | bool
+  block:
+    - name: nftables installed
+      ansible.builtin.apt:
+        name: nftables
+        state: present
+
+    - name: nftables rules
+      ansible.builtin.template:
+        src: nftables.conf.j2
+        dest: /etc/nftables.conf
+        mode: "0755"
+        validate: nft -c -f %s
+      notify: Reload nftables
+
+    - name: nftables service active
+      ansible.builtin.systemd_service:
+        name: nftables
+        enabled: true
+        state: started
+
+    - name: Working directory for the red agent
+      ansible.builtin.file:
+        path: /home/range/work
+        state: directory
+        owner: range
+        group: range
+        mode: "0750"

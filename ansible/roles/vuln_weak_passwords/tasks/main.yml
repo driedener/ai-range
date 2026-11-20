@@ -1,0 +1,19 @@
+---
+# Runs on the DC. Password spraying (T1110.003) and unsecured credentials in an AD attribute (T1552).
+- name: Spray victims with weak password
+  microsoft.ad.user:
+    identity: "{{ item.sam }}"
+    password: "{{ item.password }}"
+    update_password: when_changed
+    state: present
+  loop: "{{ vuln_spray_users }}"
+  loop_control:
+    label: "{{ item.sam }}"
+
+- name: Initial password in the description field
+  microsoft.ad.user:
+    identity: "{{ vuln_description_user.sam }}"
+    password: "{{ vuln_description_user.password }}"
+    update_password: when_changed
+    description: "{{ vuln_description_user.description }}"
+    state: present

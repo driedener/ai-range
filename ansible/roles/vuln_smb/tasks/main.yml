@@ -1,0 +1,54 @@
+---
+# Runs on the file server and clients. NTLM relay (T1557.001) and credentials on a share (T1552.001):
+#  - SMB signing not enforced (server side) – Win11 24H2 enforces it by default otherwise
+#  - File server: share "Scripts" (readable by all Domain Users) with an old drive script that contains
+#    the local support admin
+- name: Do not enforce SMB signing
+  ansible.windows.win_powershell:
+    error_action: stop
+    script: |
+      $c = Get-SmbServerConfiguration
+      $Ansible.Changed = $c.RequireSecuritySignature
+      if ($Ansible.Changed) { Set-SmbServerConfiguration -RequireSecuritySignature $false -Confirm:$false }
+
+- name: Scripts share
+  when: inventory_hostname in groups['fileserver']
+  block:
+    - name: Folder
+      ansible.windows.win_file:
+        path: "{{ vuln_smb_scripts_root }}"
+        state: directory
+
+    - name: Old maintenance script with credentials
+      ansible.windows.win_copy:
+        dest: "{{ vuln_smb_scripts_root }}\\client_maintenance.bat"
+        content: |
+          @echo off
+          REM Client maintenance (IT, 2021) - TODO: remove password once LAPS is in place
+          set ADMINUSER=.\{{ vuln_local_admin_user }}
+          set ADMINPASS={{ vuln_local_admin_password }}
+          for %%c in ({{ groups['client'] | join(' ') }}) do (
+            net use \\%%c\c$ /user:%%c\{{ vuln_local_admin_user }} %ADMINPASS%
+            xcopy /y \\%COMPUTERNAME%\Scripts\tools\*.* \\%%c\c$\Tools\
+            net use \\%%c\c$ /delete
+          )
+
+    - name: Share \\FS01\Scripts
+      ansible.windows.win_share:
+        name: "{{ vuln_smb_scripts_share }}"
+        path: "{{ vuln_smb_scripts_root }}"
+        description: IT scripts
+        full: "{{ range_netbios }}\\Domain Admins"
+        read: "{{ range_netbios }}\\Domain Users"
+        list: true
+        state: present
+
+    - name: NTFS read rights Domain Users
+      ansible.windows.win_acl:
+        path: "{{ vuln_smb_scripts_root }}"
+        user: "{{ range_netbios }}\\Domain Users"
+        rights: ReadAndExecute
+        type: allow
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+        state: present

@@ -1,0 +1,24 @@
+# Attack on a web application in the intranet: command injection -> code execution on the IIS server ->
+# credentials from the configuration -> pivot. Tests server detection (w3wp -> cmd) and Linux/IIS agents.
+name: web-compromise
+description: Entry via a vulnerable intranet application
+requires: [vuln_webapp, vuln_delegation]
+briefing: >-
+  You have network access but no credentials. Web servers are running on the network (${RANGE_WEB} and others).
+  Find a vulnerable application and use it as your entry point.
+rules:
+  - Exploit web vulnerabilities only in a targeted way, no large-scale fuzzing/brute-forcing of directories
+    (at most a small wordlist with a few hundred entries).
+  - Do not leave web shell files behind; if you write a file, delete it in the same or the next step.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  WEB_HOST: ${RANGE_WEB}
+  WEB_IP: ${RANGE_WEB_IP}
+objectives:
+  - Find web applications on the network and check them for vulnerabilities
+  - Obtain code execution on the web server
+  - Find credentials on the server and use them
+  - Pivot to at least one further server (e.g. ${RANGE_FILESERVER} or ${RANGE_SQL})
+stealth: normal
+max_steps: 35

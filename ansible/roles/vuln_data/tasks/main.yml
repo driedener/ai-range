@@ -1,0 +1,45 @@
+---
+# Made-up business data on the file server (target of insider-exfil and assumed-breach) and an
+# archive share with dummy files on which pre-ransomware practises mass renaming. All content is fictional.
+- name: Department files
+  ansible.windows.win_copy:
+    dest: "{{ fileserver_root }}\\{{ item.dir }}\\{{ item.name }}"
+    content: "{{ item.content }}"
+  loop: "{{ vuln_data_files }}"
+  loop_control:
+    label: "{{ item.dir }}\\{{ item.name }}"
+
+- name: Archive folder
+  ansible.windows.win_file:
+    path: "{{ vuln_data_archive_root }}"
+    state: directory
+
+- name: Dummy documents in the archive
+  ansible.windows.win_powershell:
+    parameters:
+      Root: "{{ vuln_data_archive_root }}"
+      Count: "{{ vuln_data_archive_files }}"
+    script: |
+      param([string]$Root, [int]$Count)
+      $Ansible.Changed = $false
+      $kinds = 'Quote', 'Invoice', 'Minutes', 'Contract', 'DeliveryNote', 'Report'
+      foreach ($i in 1..$Count) {
+        $year = 2019 + ($i % 6)
+        $dir = Join-Path $Root $year
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+        $file = Join-Path $dir ('{0}_{1:D4}.txt' -f $kinds[$i % $kinds.Count], $i)
+        if (-not (Test-Path $file)) {
+          Set-Content -Path $file -Encoding UTF8 -Value ("Range Corp – {0} No. {1:D4} ({2})`r`nTraining file without real content.`r`n" -f $kinds[$i % $kinds.Count], $i, $year)
+          $Ansible.Changed = $true
+        }
+      }
+
+- name: Share \\FS01\Archive
+  ansible.windows.win_share:
+    name: "{{ vuln_data_archive_share }}"
+    path: "{{ vuln_data_archive_root }}"
+    description: Archive (old records)
+    full: "{{ range_netbios }}\\Domain Admins"
+    read: "{{ range_netbios }}\\Domain Users"
+    list: true
+    state: present

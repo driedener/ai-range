@@ -1,0 +1,4 @@
+---
+fileserver_root: C:\Shares\Data
+fileserver_share_name: Data
+fileserver_group_prefix: GG_

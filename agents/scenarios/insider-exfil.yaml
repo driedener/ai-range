@@ -1,0 +1,25 @@
+# Insider: an employee of the finance department collects confidential data before moving to a competitor
+# and takes it away. No exploits, only legitimate rights – quiet and hard to detect.
+name: insider-exfil
+description: Insider from the finance department steals confidential data
+requires: [vuln_data]
+briefing: >-
+  You are Nina Richter, accountant in the finance department, using your normal domain account. You want to
+  take confidential documents with you without attracting attention. You only use rights you already have.
+rules:
+  - Exception to "exfiltrate nothing" – you may copy files from the shares on ${RANGE_FILESERVER} into your
+    working folder on ${RANGE_ATTACKER} (this is the simulated exfiltration). At most 20 files or
+    50 MB, and delete them on ${RANGE_ATTACKER} again as soon as you have reviewed them.
+  - No exploits, no password guessing, no other people's accounts – only your own account.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  DOMAIN_USER: nina.richter
+  DOMAIN_PASS: ${RANGE_USER_PASSWORD}
+objectives:
+  - Find out which shares and folders you have access to
+  - Find confidential documents (finance, HR, strategy) – also outside your department, if readable
+  - Bundle the most interesting files and transfer them to ${RANGE_ATTACKER}
+  - Keep traces low (few, inconspicuous accesses)
+stealth: stealthy
+max_steps: 20

@@ -1,0 +1,20 @@
+---
+- name: Install IIS
+  ansible.windows.win_feature:
+    name: Web-Server
+    include_management_tools: true
+    state: present
+
+- name: W3SVC is running
+  ansible.windows.win_service:
+    name: W3SVC
+    state: started
+    start_mode: auto
+
+- name: Start page of the Default Web Site
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\index.html
+    content: |
+      <!DOCTYPE html>
+      <html><head><title>{{ ad_objects_company | default('Range Corp') }} Intranet</title></head>
+      <body><h1>Intranet</h1><p>{{ inventory_hostname }}.{{ range_domain }}</p></body></html>

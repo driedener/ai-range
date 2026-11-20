@@ -1,0 +1,176 @@
+---
+# Deliberate vulnerabilities for the attack scenarios (agents/scenarios/*.yaml, field requires).
+# NOT part of site.yml – the base range stays clean. Each profile is a tag:
+#
+#   ansible-playbook playbooks/vulns.yml                                   # all profiles
+#   ansible-playbook playbooks/vulns.yml --tags vuln_kerberoast,vuln_adcs  # individual ones
+#
+# Back to a clean state only via snapshot (agents snapshot rollback baseline) – there is no "remove".
+# At the end the playbook writes the applied profiles to agents/state/vuln_profiles.json; the agents
+# use it to check a scenario's prerequisites. Details: roles/vuln_profiles/README.md
+
+- name: Data on the file server (finance data, archive share)
+  hosts: fileserver
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_data]
+  roles: [vuln_data]
+
+- name: Weak passwords, password in description
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_weak_passwords]
+  roles: [vuln_weak_passwords]
+
+- name: Staff directory on the intranet (usernames for spraying)
+  hosts: web
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_weak_passwords]
+  tasks:
+    - name: Staff page
+      ansible.builtin.import_role:
+        name: vuln_weak_passwords
+        tasks_from: staff_page
+
+- name: AS-REP Roasting
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_asrep]
+  roles: [vuln_asrep]
+
+- name: Kerberoasting (SPNs, weak service account password)
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_kerberoast]
+  roles: [vuln_kerberoast]
+
+- name: Kerberoasting – service account is local admin on its server
+  hosts: sql
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_kerberoast]
+  tasks:
+    - name: svc.sql in Administrators
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members: ["{{ range_netbios }}\\svc.sql"]
+        state: present
+
+- name: AD ACL abuse
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_acl]
+  roles: [vuln_acl]
+
+- name: DCSync rights for a service account
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_dcsync]
+  roles: [vuln_dcsync]
+
+- name: Kerberos delegation
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_delegation]
+  roles: [vuln_delegation]
+
+- name: AD CS – vulnerable templates (ESC1, ESC4)
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_adcs]
+  roles: [vuln_adcs]
+
+- name: AD CS – publish templates, Web Enrollment (ESC8)
+  hosts: ca
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_adcs]
+  tasks:
+    - name: Templates on the CA
+      ansible.builtin.import_role:
+        name: vuln_adcs
+        tasks_from: publish
+
+- name: GPP password in SYSVOL
+  hosts: dc
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_gpp]
+  roles: [vuln_gpp]
+
+- name: SMB signing off, scripts share with credentials
+  hosts: fileserver:client
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_smb]
+  roles: [vuln_smb]
+
+- name: Same local admin everywhere, service with domain account
+  hosts: client
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_local_admin]
+  roles: [vuln_local_admin]
+
+- name: LLMNR/NBT-NS – client looks for a typo server
+  hosts: client
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_llmnr]
+  roles: [vuln_llmnr]
+
+- name: Linux – sudo misconfiguration, SSH key reuse
+  hosts: linux_server
+  gather_facts: false
+  become: true
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_linux]
+  roles: [vuln_linux]
+
+- name: Vulnerable web app (command injection, credentials in web.config)
+  hosts: web
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [vuln_webapp]
+  roles: [vuln_webapp]
+
+- name: Record applied profiles
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [vars/vulns.yml]
+  tags: [always]
+  vars:
+    state_file: "{{ playbook_dir }}/../../agents/state/vuln_profiles.json"
+    requested: "{{ vuln_all_profiles if ('all' in ansible_run_tags) else (ansible_run_tags | intersect(vuln_all_profiles)) }}"
+    applied: "{{ requested | difference(ansible_skip_tags) }}"
+  tasks:
+    - name: Read previous state
+      ansible.builtin.set_fact:
+        vuln_state: "{{ lookup('ansible.builtin.file', state_file, errors='ignore') | default('{}', true) | from_json }}"
+
+    # writable for the agents container too (UID 1000; snapshot create/rollback writes here)
+    - name: Directories agents/state and agents/state/snapshots
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0777"
+      loop: ["{{ state_file | dirname }}", "{{ state_file | dirname }}/snapshots"]
+      when: not ansible_check_mode and applied | length > 0
+
+    - name: Write state
+      ansible.builtin.copy:
+        dest: "{{ state_file }}"
+        mode: "0666"
+        content: >-
+          {{ {'profiles': ((vuln_state.profiles | default([])) + applied) | unique | sort,
+              'updated': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')} | to_nice_json }}
+      when: not ansible_check_mode and applied | length > 0

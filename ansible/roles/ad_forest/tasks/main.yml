@@ -1,0 +1,57 @@
+---
+# New forest range.internal on DC01. The local Administrator becomes the
+# domain administrator (same password) – the WinRM connection stays.
+- name: Install AD DS role
+  ansible.windows.win_feature:
+    name: AD-Domain-Services
+    include_management_tools: true
+    state: present
+
+- name: Create forest and promote DC
+  microsoft.ad.domain:
+    dns_domain_name: "{{ range_domain }}"
+    domain_netbios_name: "{{ range_netbios }}"
+    safe_mode_password: "{{ range_dsrm_password }}"
+    install_dns: true
+    reboot: true
+
+- name: Wait until AD Web Services is running and AD responds
+  ansible.windows.win_powershell:
+    error_action: stop
+    script: |
+      $svc = Get-Service -Name ADWS -ErrorAction Stop
+      if ($svc.Status -ne 'Running') { throw "ADWS not started yet ($($svc.Status))" }
+      Import-Module ActiveDirectory
+      Get-ADDomain -Server localhost | Out-Null
+      $Ansible.Changed = $false
+  register: ad_forest_ready
+  until: ad_forest_ready is succeeded
+  retries: 30
+  delay: 20
+
+- name: Point the DC's DNS client at itself
+  ansible.windows.win_dns_client:
+    adapter_names: "*"
+    dns_servers: "{{ ad_forest_dns_client_servers | default([range_dc_ip, '127.0.0.1']) }}"
+
+- name: Set DNS forwarders
+  ansible.windows.win_powershell:
+    parameters:
+      Forwarders: "{{ range_dns_forwarders }}"
+    script: |
+      param([string[]]$Forwarders)
+      $current = @((Get-DnsServerForwarder).IPAddress | ForEach-Object { $_.IPAddressToString })
+      if ((($current | Sort-Object) -join ',') -ne (($Forwarders | Sort-Object) -join ',')) {
+        Set-DnsServerForwarder -IPAddress $Forwarders
+        $Ansible.Changed = $true
+      } else {
+        $Ansible.Changed = $false
+      }
+
+- name: Create reverse lookup zone
+  ansible.windows.win_dns_zone:
+    name: "{{ range_reverse_zone }}"
+    type: primary
+    replication: forest
+    dynamic_update: secure
+    state: present

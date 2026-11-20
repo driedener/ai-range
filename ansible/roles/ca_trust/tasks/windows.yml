@@ -1,0 +1,12 @@
+---
+- name: Copy CA certificate to the host
+  ansible.windows.win_copy:
+    src: "{{ range_ca_cert }}"
+    dest: C:\Windows\Temp\ai-range-ca.crt
+
+- name: Import CA into LocalMachine\Root
+  ansible.windows.win_certificate_store:
+    path: C:\Windows\Temp\ai-range-ca.crt
+    store_name: Root
+    store_location: LocalMachine
+    state: present

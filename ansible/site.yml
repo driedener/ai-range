@@ -1,0 +1,17 @@
+---
+# Order: AD first – DC01 is the DNS server of all other range VMs
+# (Linux apt, downloads and domain join need it), then base hardening/logging.
+- name: Active Directory
+  ansible.builtin.import_playbook: playbooks/ad.yml
+
+- name: Base
+  ansible.builtin.import_playbook: playbooks/base.yml
+
+- name: Elastic configuration (localhost, Kibana/ES API)
+  ansible.builtin.import_playbook: playbooks/elastic-config.yml
+
+- name: Elastic Agents
+  ansible.builtin.import_playbook: playbooks/agents.yml
+
+- name: Kali
+  ansible.builtin.import_playbook: playbooks/kali.yml

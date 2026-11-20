@@ -1,0 +1,30 @@
+---
+# SentinelOne Log Collection: Windows event logs of the range hosts into the Data Lake (PowerQuery) via the S1 agent.
+# One rule per channel (the API only allows one channel per rule). Scope: range site.
+
+s1lc_console_url: "{{ lookup('env', 'S1_CONSOLE_URL') | regex_replace('/+$', '') }}"
+s1lc_api_token: "{{ lookup('env', 'S1_API_TOKEN') }}"
+s1lc_site_id: "{{ lookup('env', 'S1_SITE_ID') }}"
+
+# event_ids empty = all events of the channel
+s1lc_rules:
+  - name: ai-range Security
+    channel: Security
+    description: "ai-range: logons, Kerberos/NTLM, account/group changes, services/tasks, shares, AD changes"
+    event_ids: [
+      "1102", "4624", "4625", "4648", "4662", "4672", "4688", "4697", "4698", "4702", "4719",
+      "4720", "4722", "4723", "4724", "4725", "4726", "4728", "4732", "4738", "4740", "4756",
+      "4767", "4768", "4769", "4771", "4776", "4781", "5136", "5140", "5145",
+    ]
+  - name: ai-range Sysmon
+    channel: Microsoft-Windows-Sysmon/Operational
+    description: "ai-range: Sysmon (configuration already filters)"
+    event_ids: []
+  - name: ai-range PowerShell
+    channel: Microsoft-Windows-PowerShell/Operational
+    description: "ai-range: PowerShell Module Logging (4103) and Script Block Logging (4104)"
+    event_ids: ["4103", "4104"]
+  - name: ai-range System
+    channel: System
+    description: "ai-range: service installed (7045), log cleared (104)"
+    event_ids: ["7045", "104"]

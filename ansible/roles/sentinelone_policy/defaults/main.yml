@@ -1,0 +1,17 @@
+---
+# SentinelOne agent policy of the range site: Detect or Protect. Runs on localhost (tools container).
+# Sets the site policy and every group of the site that does not inherit (Default Group: inherits false).
+
+s1pol_console_url: "{{ lookup('env', 'S1_CONSOLE_URL') | regex_replace('/+$', '') }}"
+s1pol_api_token: "{{ lookup('env', 'S1_API_TOKEN') }}"
+s1pol_site_id: "{{ lookup('env', 'S1_SITE_ID') }}"
+
+# detect: report only – exercises measure detection. protect: S1 stops known red tools immediately,
+# exercises then mainly measure prevention (docs/sentinelone.md).
+s1pol_mitigation_mode: protect             # Threats: detect | protect
+s1pol_mitigation_mode_suspicious: protect  # Suspicious: detect | protect
+# Automatic action; in Protect the API rejects mitigation.none ("This capability is not valid in Protect Mode").
+# mitigation.quarantineThreat = Kill & Quarantine
+s1pol_auto_mitigation_action: >-
+  {{ 'mitigation.quarantineThreat' if 'protect' in [s1pol_mitigation_mode, s1pol_mitigation_mode_suspicious]
+     else 'mitigation.none' }}

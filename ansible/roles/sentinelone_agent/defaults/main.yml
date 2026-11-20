@@ -1,0 +1,28 @@
+---
+# Installers live in the repo under sources/sentinelone/installer (not checked in, see .gitignore).
+# The tools container sees the repo under /work. The newest matching file is used.
+sentinelone_installer_dir: "{{ playbook_dir }}/../../sources/sentinelone/installer"
+sentinelone_installer_windows_glob: SentinelOneInstaller_windows_64bit_*.exe
+sentinelone_installer_linux_glob: SentinelAgent_linux_x86_64_*.deb
+
+# Site token (registration token of the range site). Empty -> fetch via API from S1_SITE_ID.
+sentinelone_site_token: "{{ lookup('env', 'S1_SITE_TOKEN') }}"
+sentinelone_console_url: "{{ lookup('env', 'S1_CONSOLE_URL') | regex_replace('/+$', '') }}"
+sentinelone_api_token: "{{ lookup('env', 'S1_API_TOKEN') }}"
+sentinelone_site_id: "{{ lookup('env', 'S1_SITE_ID') }}"
+
+# Target directories on the hosts
+sentinelone_win_tmp: C:\ProgramData\ai-range\sentinelone
+sentinelone_linux_tmp: /opt/ai-range/sentinelone
+
+# Windows: service + extra arguments for the installer (-t <token> -q are always set)
+sentinelone_win_service: SentinelAgent
+sentinelone_win_install_extra_args: ""
+# Exit codes that count as success (3010 = reboot required)
+sentinelone_win_ok_rc: [0, 3010]
+# Reboot after installation if the installer requests it
+sentinelone_win_reboot: true
+
+# Linux: systemd unit and sentinelctl
+sentinelone_linux_service: sentinelone
+sentinelone_sentinelctl: /opt/sentinelone/bin/sentinelctl

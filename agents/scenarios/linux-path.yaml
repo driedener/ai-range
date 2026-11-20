@@ -1,0 +1,26 @@
+# Linux path: entry with an SSH account on the Linux web server, privilege escalation, key reuse
+# to the DB server and from there back into AD. Tests the Linux agents.
+name: linux-path
+description: SSH account on the Linux web server, from there to root and into AD
+requires: [vuln_linux]
+briefing: >-
+  You have the SSH password of the deployment account $LINUX_USER on ${RANGE_LINUX_WEB} (${RANGE_LINUX_WEB_IP}, e.g. from a public
+  Git repository). Work on the Linux servers via ssh/sshpass.
+rules:
+  - Do not install packages on the Linux servers and do not create files outside /tmp; delete whatever you
+    create in /tmp in the same step.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  LINUX_HOST: ${RANGE_LINUX_WEB}
+  LINUX_IP: ${RANGE_LINUX_WEB_IP}
+  # same as vuln_linux_* in ansible/playbooks/vars/vulns.yml
+  LINUX_USER: deploy
+  LINUX_PASS: Deploy-2026!
+objectives:
+  - Log on to ${RANGE_LINUX_WEB} and explore the host
+  - Obtain root privileges on ${RANGE_LINUX_WEB}
+  - Reach further Linux servers (credentials, keys, history)
+  - Find credentials for the Windows domain and use them to reach a Windows server
+stealth: normal
+max_steps: 30

@@ -1,0 +1,67 @@
+# ai-range - single definition of the environment: controller, Proxmox, range network and VMs.
+#
+#   cp range.example.yaml range.yaml      # range.yaml is git-ignored, edit it for your environment
+#
+# No secrets here (they live in docker/.env). Regenerate after every change:
+#   cd docker && docker compose --env-file .env run --rm tools python3 scripts/configure.py
+# This writes ansible/inventory/range.yml and docker/range.env; Terraform, Packer and the agents
+# read this file directly. Reference: docs/configuration.md
+
+organization: Example Corp        # company name used in the agent prompts
+domain: corp.internal             # AD domain (FQDN)
+netbios: CORP                     # NetBIOS name of the domain
+
+# Management host (controller): Docker with Elastic, Fleet, tools and agents containers
+controller:
+  name: controller
+  ip: 10.0.10.5                   # address the range VMs use to reach the controller (Fleet, certificates, Packer HTTP)
+  admin_networks:                 # networks allowed to open Kibana (controller firewall)
+    - 10.0.10.0/24
+
+proxmox:
+  endpoint: https://10.0.10.11:8006/
+  bridge: vmbr0
+  datastore: local-lvm            # VM disks and cloud-init drives (e.g. local-zfs on ZFS installs)
+  iso_storage: local              # storage with content "iso" on every node: installer ISOs + generated CDs
+  full_clone: false               # false = linked clone (the template must live on the same node)
+  nodes:                          # node name -> IP (a single node works too)
+    pve1: 10.0.10.11
+    pve2: 10.0.10.12
+  templates:                      # Packer templates: OS and VMID per node
+    win2022:    { os: windows, vm_ids: { pve1: 9000, pve2: 9100 } }
+    win11:      { os: windows, vm_ids: { pve1: 9001, pve2: 9101 } }
+    ubuntu2404: { os: linux,   vm_ids: { pve1: 9002, pve2: 9102 } }
+    kali:       { os: linux,   vm_ids: { pve1: 9003, pve2: 9103 } }
+
+# The single range network (a VLAN on the Proxmox bridge). Needs DHCP (for Packer builds),
+# a router with DNS and internet access, and routing to/from the controller.
+network:
+  vlan_id: 21
+  cidr: 10.0.21.0/24
+  gateway: 10.0.21.1              # router: DNS forwarder of the DC; never an attack or block target
+  vm_id_base: 21000               # VMID = base + last octet of the IP (unless vm_id is set)
+
+# Language, keyboard and time zone of the templates and hosts (all optional, defaults shown)
+locale:
+  language: en-US                 # Windows UI/system locale (must be on the ISO); Linux uses en_US.UTF-8
+  keyboard: us                    # Linux XKB layout (e.g. de, ch, fr)
+  windows_input_locale: en-US     # Windows keyboard (e.g. de-DE, de-CH, fr-FR)
+  timezone: Etc/UTC               # IANA time zone for Linux (e.g. Europe/Berlin)
+  windows_timezone: UTC           # Windows time zone ID (e.g. "W. Europe Standard Time")
+
+# VMs. role: dc | server | client | linux_server | attacker (exactly one dc and one attacker).
+# services: functions that Ansible playbooks and agents use to find hosts:
+#   ca (enterprise CA), web (IIS), fileserver, sql, identity_connector (SentinelOne Identity, not the DC)
+# Optional: vm_id, disk_gb, dns (default: dc/attacker -> gateway, everything else -> DC).
+vms:
+  DC01:      { ip: 10.0.21.10,  node: pve1, template: win2022,    role: dc,           cores: 2, memory_mb: 4096 }
+  CA01:      { ip: 10.0.21.12,  node: pve1, template: win2022,    role: server,       cores: 2, memory_mb: 3072, services: [ca] }
+  FS01:      { ip: 10.0.21.13,  node: pve2, template: win2022,    role: server,       cores: 2, memory_mb: 4096, disk_gb: 80, services: [fileserver] }
+  SQL01:     { ip: 10.0.21.14,  node: pve1, template: win2022,    role: server,       cores: 4, memory_mb: 6144, disk_gb: 80, services: [sql, identity_connector] }
+  WEB01:     { ip: 10.0.21.15,  node: pve2, template: win2022,    role: server,       cores: 2, memory_mb: 4096, services: [web] }
+  WS01:      { ip: 10.0.21.51,  node: pve1, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  WS02:      { ip: 10.0.21.52,  node: pve2, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  WS03:      { ip: 10.0.21.53,  node: pve2, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  lnx-web01: { ip: 10.0.21.100, node: pve2, template: ubuntu2404, role: linux_server, cores: 2, memory_mb: 2048 }
+  lnx-db01:  { ip: 10.0.21.101, node: pve2, template: ubuntu2404, role: linux_server, cores: 2, memory_mb: 2048 }
+  kali01:    { ip: 10.0.21.200, node: pve1, template: kali,       role: attacker,     cores: 4, memory_mb: 8192 }

@@ -1,0 +1,86 @@
+---
+# Runs on the IIS host. Exploit Public-Facing Application (T1190) -> web shell / command injection
+# (T1505.003, T1059.003) -> credentials in configuration files (T1552.001):
+#  - /tools/ping.aspx: "Network Diagnostics", appends the parameter host unchecked to "cmd /c ping"
+#  - /tools/web.config: connection string with svc.web (IIS does not serve web.config – readable only via
+#    the injection). svc.web is local admin on the IIS host and, with vuln_delegation, has constrained
+#    delegation to the file server.
+- name: ASP.NET 4.x
+  ansible.windows.win_feature:
+    name: [Web-Asp-Net45, NET-Framework-45-ASPNET]
+    state: present
+
+- name: Password svc.web in AD
+  microsoft.ad.user:
+    identity: svc.web
+    password: "{{ vuln_svc_passwords['svc.web'] }}"
+    update_password: when_changed
+    state: present
+  delegate_to: "{{ groups['dc'][0] }}"
+
+- name: svc.web in Administrators
+  ansible.windows.win_group_membership:
+    name: Administrators
+    members: ["{{ range_netbios }}\\svc.web"]
+    state: present
+
+- name: Folder /tools
+  ansible.windows.win_file:
+    path: C:\inetpub\wwwroot\tools
+    state: directory
+
+- name: ping.aspx (Command Injection)
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\tools\ping.aspx
+    content: |
+      <%@ Page Language="C#" %>
+      <%@ Import Namespace="System.Diagnostics" %>
+      <script runat="server">
+        protected void Page_Load(object sender, EventArgs e) {
+          string host = Request["host"];
+          if (String.IsNullOrEmpty(host)) return;
+          // DELIBERATELY VULNERABLE (ai-range vuln_webapp): input passed unchecked to the command line
+          var p = new Process();
+          p.StartInfo.FileName = "cmd.exe";
+          p.StartInfo.Arguments = "/c ping -n 2 " + host;
+          p.StartInfo.UseShellExecute = false;
+          p.StartInfo.RedirectStandardOutput = true;
+          p.StartInfo.RedirectStandardError = true;
+          p.Start();
+          string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+          p.WaitForExit(30000);
+          result.Text = Server.HtmlEncode(output);
+        }
+      </script>
+      <!DOCTYPE html>
+      <html lang="en"><head><meta charset="utf-8"><title>Network Diagnostics</title></head>
+      <body><h1>IT Tools: Network Diagnostics</h1>
+      <form method="get"><input name="host" placeholder="Hostname or IP"> <button>Ping</button></form>
+      <pre><asp:Literal id="result" runat="server" /></pre></body></html>
+
+- name: web.config with credentials
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\tools\web.config
+    content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <configuration>
+        <connectionStrings>
+          <!-- Intranet DB; TODO: switch to Integrated Security -->
+          <add name="IntranetDb" providerName="System.Data.SqlClient"
+               connectionString="Server={{ groups['sql'][0] | lower }}.{{ range_domain }};Database=Intranet;User ID={{ range_netbios }}\svc.web;Password={{ vuln_svc_passwords['svc.web'] }};" />
+        </connectionStrings>
+        <system.web>
+          <compilation targetFramework="4.8" />
+          <customErrors mode="Off" />
+        </system.web>
+      </configuration>
+
+- name: Intranet home page with link to the tools
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\index.html
+    content: |
+      <!DOCTYPE html>
+      <html lang="en"><head><meta charset="utf-8"><title>{{ range_organization }} Intranet</title></head>
+      <body><h1>Intranet</h1><p>{{ inventory_hostname }}.{{ range_domain }}</p>
+      <ul><li><a href="/team.html">Our Team</a></li><li><a href="/tools/ping.aspx">IT Tools: Network Diagnostics</a></li></ul>
+      </body></html>

@@ -1,0 +1,71 @@
+---
+ad_objects_company: Range Corp
+
+# OUs directly below the domain
+ad_objects_ous:
+  - name: Tier0
+    description: Tier-0-Admins (Domain Admins)
+  - name: Servers
+    description: Member servers
+  - name: Workstations
+    description: Clients
+  - name: Staff  # not "Users": collides with the built-in CN=Users
+    description: Employees
+  - name: Groups
+    description: Department and role groups
+  - name: ServiceAccounts
+    description: Service accounts
+
+# Department groups GG_<Department> from range_departments (group_vars/all.yml)
+ad_objects_group_prefix: GG_
+
+# Employees (sam = firstname.lastname, max. 20 characters)
+ad_objects_users:
+  - { first: Thomas, last: Müller, sam: thomas.mueller, department: Management, title: Managing Director }
+  - { first: Sabine, last: Becker, sam: sabine.becker, department: Management, title: Executive Assistant }
+  - { first: Michael, last: Schmidt, sam: michael.schmidt, department: IT, title: Head of IT }
+  - { first: Julia, last: Wagner, sam: julia.wagner, department: IT, title: System Administrator }
+  - { first: Daniel, last: Hoffmann, sam: daniel.hoffmann, department: IT, title: System Administrator }
+  - { first: Lukas, last: Schulz, sam: lukas.schulz, department: IT, title: Helpdesk Technician }
+  - { first: Lea, last: Koch, sam: lea.koch, department: IT, title: Helpdesk Technician }
+  - { first: Andreas, last: Fischer, sam: andreas.fischer, department: Finance, title: Head of Finance }
+  - { first: Claudia, last: Weber, sam: claudia.weber, department: Finance, title: Accountant }
+  - { first: Stefan, last: Meyer, sam: stefan.meyer, department: Finance, title: Controller }
+  - { first: Nina, last: Richter, sam: nina.richter, department: Finance, title: Accountant }
+  - { first: Petra, last: Klein, sam: petra.klein, department: HR, title: Head of HR }
+  - { first: Markus, last: Wolf, sam: markus.wolf, department: HR, title: HR Specialist }
+  - { first: Laura, last: Schröder, sam: laura.schroeder, department: HR, title: HR Specialist }
+  - { first: Jan, last: Neumann, sam: jan.neumann, department: Sales, title: Head of Sales }
+  - { first: Katrin, last: Schwarz, sam: katrin.schwarz, department: Sales, title: Key Account Manager }
+  - { first: Florian, last: Zimmermann, sam: florian.zimmermann, department: Sales, title: Sales Representative }
+  - { first: Sarah, last: Braun, sam: sarah.braun, department: Sales, title: Sales Representative }
+  - { first: Tobias, last: Krüger, sam: tobias.krueger, department: Sales, title: Inside Sales }
+  - { first: Anna, last: Hofmann, sam: anna.hofmann, department: Marketing, title: Head of Marketing }
+  - { first: Felix, last: Hartmann, sam: felix.hartmann, department: Marketing, title: Online Marketing }
+  - { first: Lisa, last: Lange, sam: lisa.lange, department: Marketing, title: Graphic Designer }
+  - { first: Martin, last: Schmitt, sam: martin.schmitt, department: Engineering, title: Head of Engineering }
+  - { first: Sophie, last: Werner, sam: sophie.werner, department: Engineering, title: Software Developer }
+  - { first: Jonas, last: Krause, sam: jonas.krause, department: Engineering, title: Software Developer }
+  - { first: Maria, last: Meier, sam: maria.meier, department: Engineering, title: Software Developer }
+  - { first: Sebastian, last: Lehmann, sam: sebastian.lehmann, department: Engineering, title: DevOps Engineer }
+  - { first: Christina, last: Huber, sam: christina.huber, department: Engineering, title: QA Engineer }
+  - { first: Patrick, last: Kaiser, sam: patrick.kaiser, department: Engineering, title: Working Student }
+  - { first: Melanie, last: Fuchs, sam: melanie.fuchs, department: Finance, title: Purchasing }
+
+# Admin accounts (Tier 0) – Domain Admins
+ad_objects_admins:
+  - { first: Michael, last: Schmidt, sam: adm.schmidt }
+  - { first: Julia, last: Wagner, sam: adm.wagner }
+  - { first: Daniel, last: Hoffmann, sam: adm.hoffmann }
+
+# Service accounts (still without SPN/vulnerabilities – see roles/vuln_profiles)
+ad_objects_service_accounts:
+  - { sam: svc.sql, description: Service account SQL Server (SQL01) }
+  - { sam: svc.web, description: Service account IIS app pool (WEB01) }
+  - { sam: svc.backup, description: Service account backup }
+
+# Read-only account for the SentinelOne Identity connector (AD configuration in the S1 console).
+# Domain Users only, own password from S1_AD_PASSWORD – not the shared RANGE_USER_PASSWORD,
+# which Red can spray. Empty password = account is not created.
+ad_objects_s1_identity_user: svc.s1identity
+ad_objects_s1_identity_password: "{{ lookup('env', 'S1_AD_PASSWORD') }}"

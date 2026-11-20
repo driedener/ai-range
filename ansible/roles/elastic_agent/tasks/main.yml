@@ -1,0 +1,52 @@
+---
+# Fetch enrollment tokens once per play from the controller (all policies at once),
+# then each host picks the token of its policy (range-windows / range-linux).
+- name: Check prerequisites
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_version | length > 0
+      - range_controller_ip | default('') | length > 0
+      - elastic_agent_kibana_password | length > 0
+    fail_msg: ELASTIC_VERSION and ELASTIC_PASSWORD (tools container) as well as range_controller_ip (inventory from range.yaml) must be set.
+    quiet: true
+
+- name: Read enrollment API keys from Fleet
+  ansible.builtin.uri:
+    url: "{{ elastic_agent_kibana_url }}/api/fleet/enrollment_api_keys?perPage=1000"
+    method: GET
+    url_username: "{{ elastic_agent_kibana_user }}"
+    url_password: "{{ elastic_agent_kibana_password }}"
+    force_basic_auth: true
+    ca_path: "{{ elastic_agent_kibana_ca }}"
+    headers:
+      kbn-xsrf: "true"
+    return_content: true
+    status_code: 200
+  register: elastic_agent_keys
+  delegate_to: localhost
+  run_once: true
+  become: false
+  no_log: true
+
+- name: Select enrollment token of the host's policy
+  ansible.builtin.set_fact:
+    elastic_agent_enrollment_token: >-
+      {{ (elastic_agent_keys.json['items']
+          | selectattr('policy_id', 'equalto', elastic_agent_policy_id)
+          | selectattr('active', 'equalto', true)
+          | map(attribute='api_key') | list | first) | default('') }}
+  no_log: true
+
+- name: Token present
+  ansible.builtin.assert:
+    that: elastic_agent_enrollment_token | length > 0
+    fail_msg: "No active enrollment token found in Fleet for policy {{ elastic_agent_policy_id }}."
+    quiet: true
+
+- name: Elastic Agent (Windows)
+  ansible.builtin.include_tasks: windows.yml
+  when: "'windows' in group_names"
+
+- name: Elastic Agent (Linux)
+  ansible.builtin.include_tasks: linux.yml
+  when: "'linux' in group_names"

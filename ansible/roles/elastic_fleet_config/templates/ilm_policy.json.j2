@@ -1,0 +1,26 @@
+{
+  "policy": {
+    "_meta": {
+      "managed_by": "ai-range ansible elastic_fleet_config",
+      "version": {{ ilm_version | int }},
+      "retention_days": {{ ilm_retention_days | int }}
+    },
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_age": "{{ ilm_rollover_max_age }}",
+            "max_primary_shard_size": "{{ range_rollover_max_primary_shard_size }}"
+          }
+        }
+      },
+      "delete": {
+        "min_age": "{{ ilm_retention_days | int }}d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}

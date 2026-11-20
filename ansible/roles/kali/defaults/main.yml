@@ -1,0 +1,37 @@
+---
+# Kali packages for AD attacks (no Elastic Agent – Kali is the attacker)
+kali_packages:
+  - python3-venv
+  - python3-pip
+  - pipx
+  - nmap
+  - python3-impacket
+  - impacket-scripts
+  - netexec
+  - bloodhound.py
+  - responder
+  - evil-winrm
+  - certipy-ad
+  - smbclient
+  - gpp-decrypt
+  - john
+  - hashcat
+  - wordlists
+  - sshpass
+
+# Commands that must be in PATH afterwards
+kali_required_commands:
+  - nmap
+  - nxc
+  - impacket-secretsdump
+  - impacket-GetUserSPNs
+  - bloodhound-python
+  - responder
+  - evil-winrm
+  - certipy-ad
+  - john
+
+# Egress guard (nftables): Kali may only reach the range VLAN + internet
+kali_guard_enabled: true
+kali_guard_allowed_cidr: "{{ range_cidr }}"
+kali_guard_gateway: "{{ range_gateway }}"

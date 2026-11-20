@@ -1,0 +1,74 @@
+---
+- name: Check required env variables
+  ansible.builtin.assert:
+    that:
+      - elastic_password | length > 0
+    fail_msg: "ELASTIC_PASSWORD is not set in the tools container (docker/.env)."
+    quiet: true
+
+- name: Check passwords of the range users (RANGE_BLUE/RED/ORCH_PASSWORD)
+  ansible.builtin.assert:
+    that:
+      - lookup('env', item.password_env) | length >= 8
+    fail_msg: >-
+      Env variable {{ item.password_env }} (password for user {{ item.username }})
+      is missing or shorter than 8 characters. Set it in docker/.env and pass it
+      through to the tools service in docker/compose.yml.
+    quiet: true
+  loop: "{{ range_users }}"
+  loop_control:
+    label: "{{ item.password_env }}"
+
+- name: CA certificate present?
+  ansible.builtin.stat:
+    path: "{{ range_ca_cert }}"
+  register: _ca
+
+- name: Check CA certificate
+  ansible.builtin.assert:
+    that: _ca.stat.exists
+    fail_msg: "{{ range_ca_cert }} is missing – is the playbook running in the tools container (certs volume)?"
+    quiet: true
+
+- name: Wait until Kibana is available
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/status"
+    headers: "{{ kbn_headers }}"
+  register: _kbn_status
+  until: >-
+    _kbn_status.status == 200 and
+    (_kbn_status.json.status.overall.level | default('')) == 'available'
+  retries: "{{ kibana_wait_retries }}"
+  delay: "{{ kibana_wait_delay }}"
+  changed_when: false
+
+- name: Query license
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_license"
+  register: _license
+  changed_when: false
+
+- name: Remember license
+  ansible.builtin.set_fact:
+    elastic_license_type: "{{ _license.json.license.type }}"
+    elastic_license_status: "{{ _license.json.license.status }}"
+    # trial counts as enterprise
+    elastic_license_paid: >-
+      {{ _license.json.license.status == 'active' and
+         _license.json.license.type in ['trial', 'platinum', 'enterprise'] }}
+
+- name: Show license
+  ansible.builtin.debug:
+    msg: >-
+      License: {{ elastic_license_type }} ({{ elastic_license_status }}),
+      Platinum features {{ 'available' if elastic_license_paid | bool else 'NOT available (Basic)' }}
+
+- name: Ensure Fleet setup (idempotent)
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/setup"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    status_code: [200]
+  register: _fleet_setup
+  changed_when: false
+  tags: [defend]

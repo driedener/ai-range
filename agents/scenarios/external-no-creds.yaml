@@ -1,0 +1,22 @@
+# External attacker without credentials: is plugged into the network (e.g. a network port in the meeting room)
+# but knows no account. Tests detection at network/identity level (Ranger, S1 Identity, spraying, poisoning).
+name: external-no-creds
+description: Attacker with network access but without credentials
+requires: [vuln_weak_passwords, vuln_llmnr, vuln_smb]
+briefing: >-
+  You only have a network port in the range network and no credentials at all. All you know is that the
+  company is called ${RANGE_ORGANIZATION} and its domain is ${RANGE_DOMAIN}. You may use publicly visible
+  information (web pages on the network).
+rules:
+  - Responder/poisoning only with `timeout` (at most 10 minutes at a time) and without WPAD/DHCP spoofing.
+  - You may crack captured hashes offline on ${RANGE_ATTACKER} (john/hashcat, wordlist rockyou).
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+objectives:
+  - Explore the network and services, find out usernames
+  - Obtain the first valid domain credentials (spraying, poisoning, open shares …)
+  - Use these credentials to explore the domain and gather further privileges
+  - If possible, local admin on at least one host
+stealth: normal
+max_steps: 40

@@ -1,0 +1,8 @@
+---
+ansible_connection: ssh
+ansible_user: range
+ansible_password: "{{ range_admin_password }}"
+ansible_become_method: sudo
+ansible_become_password: "{{ range_admin_password }}"
+ansible_ssh_common_args: -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+ansible_python_interpreter: auto_silent

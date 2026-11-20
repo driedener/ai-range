@@ -1,0 +1,17 @@
+---
+# Base hardening/logging for all range hosts: CA trust, Windows logging, Sysmon, Linux base
+- name: Windows base
+  hosts: windows
+  gather_facts: false
+  roles:
+    - ca_trust
+    - win_base
+    - sysmon
+
+- name: Linux base
+  hosts: linux
+  gather_facts: false
+  become: true
+  roles:
+    - ca_trust
+    - linux_base

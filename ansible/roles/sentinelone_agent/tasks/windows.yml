@@ -1,0 +1,46 @@
+---
+- name: Check SentinelOne service
+  ansible.windows.win_service_info:
+    name: "{{ sentinelone_win_service }}"
+  register: sentinelone_win_svc
+
+- name: Install SentinelOne
+  when: not sentinelone_win_svc.exists
+  vars:
+    sentinelone_win_exe: "{{ sentinelone_win_tmp }}\\{{ sentinelone_installer_windows | basename }}"
+  block:
+    - name: Create target directory
+      ansible.windows.win_file:
+        path: "{{ sentinelone_win_tmp }}"
+        state: directory
+
+    # ~90 MB over WinRM – takes several minutes
+    - name: Copy installer
+      ansible.windows.win_copy:
+        src: "{{ sentinelone_installer_windows }}"
+        dest: "{{ sentinelone_win_exe }}"
+
+    - name: Install agent (site token, silent)
+      ansible.windows.win_command: >-
+        "{{ sentinelone_win_exe }}" -t {{ sentinelone_site_token }} -q {{ sentinelone_win_install_extra_args }}
+      register: sentinelone_win_install
+      failed_when: sentinelone_win_install.rc not in sentinelone_win_ok_rc
+      no_log: true
+
+    - name: Reboot after installation
+      ansible.windows.win_reboot:
+        reboot_timeout: 900
+      when: sentinelone_win_reboot | bool and sentinelone_win_install.rc == 3010
+
+    - name: Remove installer
+      ansible.windows.win_file:
+        path: "{{ sentinelone_win_tmp }}"
+        state: absent
+
+- name: SentinelOne service is running
+  ansible.windows.win_service_info:
+    name: "{{ sentinelone_win_service }}"
+  register: sentinelone_win_svc_after
+  until: sentinelone_win_svc_after.exists and sentinelone_win_svc_after.services[0].state == 'started'
+  retries: 20
+  delay: 15

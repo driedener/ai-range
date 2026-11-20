@@ -1,0 +1,47 @@
+# Fixed topology for the offline tests (tests/offline_fixture.py sets AIRANGE_RANGE_FILE to this file).
+# Same structure as range.example.yaml; the test data in smoke_scorer.py / smoke_s1.py relies on these
+# names and IPs, so change them together. Not used by the live tests (they read your range.yaml).
+
+organization: Test Corp
+domain: corp.internal
+netbios: CORP
+
+controller:
+  name: controller
+  ip: 10.0.10.5
+  admin_networks:
+    - 10.0.10.0/24
+
+proxmox:
+  endpoint: https://10.0.10.11:8006/
+  bridge: vmbr0
+  datastore: local-lvm
+  iso_storage: local
+  full_clone: false
+  nodes:
+    pve1: 10.0.10.11
+    pve2: 10.0.10.12
+  templates:
+    win2022:    { os: windows, vm_ids: { pve1: 9000, pve2: 9100 } }
+    win11:      { os: windows, vm_ids: { pve1: 9001, pve2: 9101 } }
+    ubuntu2404: { os: linux,   vm_ids: { pve1: 9002, pve2: 9102 } }
+    kali:       { os: linux,   vm_ids: { pve1: 9003, pve2: 9103 } }
+
+network:
+  vlan_id: 21
+  cidr: 10.0.21.0/24
+  gateway: 10.0.21.1
+  vm_id_base: 21000
+
+vms:
+  DC01:      { ip: 10.0.21.10,  node: pve1, template: win2022,    role: dc,           cores: 2, memory_mb: 4096 }
+  CA01:      { ip: 10.0.21.12,  node: pve1, template: win2022,    role: server,       cores: 2, memory_mb: 3072, services: [ca] }
+  FS01:      { ip: 10.0.21.13,  node: pve2, template: win2022,    role: server,       cores: 2, memory_mb: 4096, services: [fileserver] }
+  SQL01:     { ip: 10.0.21.14,  node: pve1, template: win2022,    role: server,       cores: 4, memory_mb: 6144, services: [sql, identity_connector] }
+  WEB01:     { ip: 10.0.21.15,  node: pve2, template: win2022,    role: server,       cores: 2, memory_mb: 4096, services: [web] }
+  WS01:      { ip: 10.0.21.51,  node: pve1, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  WS02:      { ip: 10.0.21.52,  node: pve2, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  WS03:      { ip: 10.0.21.53,  node: pve2, template: win11,      role: client,       cores: 4, memory_mb: 6144 }
+  lnx-web01: { ip: 10.0.21.100, node: pve2, template: ubuntu2404, role: linux_server, cores: 2, memory_mb: 2048 }
+  lnx-db01:  { ip: 10.0.21.101, node: pve2, template: ubuntu2404, role: linux_server, cores: 2, memory_mb: 2048 }
+  kali01:    { ip: 10.0.21.200, node: pve1, template: kali,       role: attacker,     cores: 4, memory_mb: 8192 }

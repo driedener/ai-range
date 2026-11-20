@@ -1,0 +1,16 @@
+---
+- name: Set DNS to DC01
+  ansible.windows.win_dns_client:
+    adapter_names: "*"
+    dns_servers:
+      - "{{ range_dc_ip }}"
+
+- name: Join domain (incl. target OU) and reboot
+  microsoft.ad.membership:
+    dns_domain_name: "{{ range_domain }}"
+    hostname: "{{ inventory_hostname }}"
+    domain_admin_user: "{{ range_domain_admin_user }}"
+    domain_admin_password: "{{ range_domain_admin_password }}"
+    domain_ou_path: "{{ domain_join_ou }}"
+    state: domain
+    reboot: true

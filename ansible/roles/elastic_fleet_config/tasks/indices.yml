@@ -1,0 +1,69 @@
+---
+# Index templates + data streams for ground truth and agent traces.
+# Names deliberately outside of logs-* (see docs/elastic.md, "Ground-Truth-Isolation").
+- name: Read index templates
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_index_template/{{ item.name }}"
+    status_code: [200, 404]
+  register: _range_templates
+  changed_when: false
+  loop: &range_streams
+    - name: "{{ range_groundtruth_stream }}"
+      template: groundtruth_template.json.j2
+    - name: "{{ range_agenttrace_stream }}"
+      template: agenttrace_template.json.j2
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Write index templates (new or version changed)
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_index_template/{{ item.item.name }}"
+    method: PUT
+    body_format: json
+    body: "{{ lookup('ansible.builtin.template', item.item.template) }}"
+  when: >-
+    item.status == 404 or
+    (item.json.index_templates[0].index_template.version | default(-1) | int)
+      != (range_template_version | int)
+  changed_when: true
+  register: _range_templates_put
+  loop: "{{ _range_templates.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# A changed template only applies to the next backing index:
+# roll existing data streams on the next write (lazy).
+- name: Roll existing data streams after template update (lazy)
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/{{ item.item.item.name }}/_rollover?lazy=true"
+    method: POST
+    status_code: [200, 404]
+  when:
+    - item is changed
+    - item.item.status == 200
+  changed_when: true
+  loop: "{{ _range_templates_put.results }}"
+  loop_control:
+    label: "{{ item.item.item.name }}"
+
+- name: Read data streams
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_data_stream/{{ item.name }}"
+    status_code: [200, 404]
+  register: _range_ds
+  changed_when: false
+  loop: *range_streams
+  loop_control:
+    label: "{{ item.name }}"
+
+# Create in advance so red-agent/blue-agent can write with create_doc
+# without needing rights to create data streams.
+- name: Create data streams
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_data_stream/{{ item.item.name }}"
+    method: PUT
+  when: item.status == 404
+  changed_when: true
+  loop: "{{ _range_ds.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

@@ -1,0 +1,15 @@
+---
+# Runs on the DC. AD ACL abuse (T1222.001, BloodHound path):
+#   GG_IT (helpdesk, incl. lukas.schulz) --GenericWrite--> svc.backup  => targeted Kerberoasting (set SPN,
+#   request TGS, remove SPN) and cracking the weak password. With vuln_dcsync the path leads all the way to DCSync.
+- name: Password svc.backup (crackable)
+  microsoft.ad.user:
+    identity: svc.backup
+    password: "{{ vuln_svc_passwords['svc.backup'] }}"
+    update_password: when_changed
+    state: present
+
+- name: ACEs
+  ansible.builtin.include_tasks: aces.yml
+  vars:
+    aces: "{{ vuln_acl_aces }}"

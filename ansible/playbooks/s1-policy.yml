@@ -1,0 +1,10 @@
+---
+# SentinelOne agent policy of the range site (Detect/Protect), variables in roles/sentinelone_policy/defaults.
+#   docker compose --env-file .env run --rm tools sh -c "cd ansible && ansible-playbook playbooks/s1-policy.yml"
+#   … -e s1pol_mitigation_mode=detect -e s1pol_mitigation_mode_suspicious=detect   (back to Detect)
+- name: SentinelOne agent policy
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: ../roles/sentinelone_policy

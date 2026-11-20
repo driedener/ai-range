@@ -1,0 +1,37 @@
+# Coverage measurement: fixed list of individual techniques, exactly one step each, noisy. No attack goal – the
+# report shows per technique whether it was detected. Easy to compare over time and input for the Engineer.
+name: atomic-sweep
+description: Fixed list of individual ATT&CK techniques to measure detection coverage
+requires: []
+briefing: >-
+  This is NOT a targeted attack but a coverage measurement. Execute the techniques in the objective list
+  in order, each in exactly one kali_exec step with the given technique ID, even if one of them
+  fails. No extra steps apart from short preparations. Rate success/failure per technique in the report.
+rules:
+  - Password spraying only with ONE password against at most 10 accounts.
+  - Responder for at most 3 minutes (`timeout 180`).
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  DOMAIN_USER: lukas.schulz
+  DOMAIN_PASS: ${RANGE_USER_PASSWORD}
+objectives:
+  - T1046 Network Service Discovery - port scan of the top 100 ports in the range network
+  - T1018 Remote System Discovery - list hosts via DNS/LDAP
+  - T1087.002 Domain Account Discovery - all domain users via LDAP
+  - T1069.002 Domain Groups - members of privileged groups
+  - T1201 Password Policy Discovery
+  - T1482 Domain Trust Discovery
+  - T1135 Network Share Discovery - shares of all servers
+  - T1083 File and Directory Discovery - contents of a readable share on ${RANGE_FILESERVER}
+  - T1110.003 Password Spraying - one password against up to 10 accounts
+  - T1558.004 AS-REP Roasting
+  - T1558.003 Kerberoasting
+  - T1649 AD CS - enumerate templates and CA with certipy (find)
+  - T1557.001 LLMNR/NBT-NS Poisoning - Responder in analyze or poison mode
+  - T1021.006 WinRM - logon attempt on ${RANGE_FILESERVER}
+  - T1047 WMI - attempt command execution on ${RANGE_FILESERVER}
+  - T1021.002 SMB/Admin Shares - attempt access to C$ on ${RANGE_FILESERVER}
+  - T1003.006 DCSync - attempt with the available account
+stealth: noisy
+max_steps: 25

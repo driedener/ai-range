@@ -1,0 +1,3 @@
+---
+# second client (WS02), so the first one (WS01) stays free for workstation-beachhead
+vuln_llmnr_victim_host: "{{ groups['client'][1] | default(groups['client'][0]) }}"

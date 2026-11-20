@@ -1,0 +1,16 @@
+---
+# Runs on the IIS host. Public staff directory: reveals names and the username scheme
+# (firstname.lastname) – the basis for spraying without domain access (T1589.002/T1589.003).
+- name: Staff directory
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\team.html
+    content: |
+      <!DOCTYPE html>
+      <html lang="en"><head><meta charset="utf-8"><title>{{ range_organization }} – Team</title></head>
+      <body><h1>Our Team</h1>
+      <p>You can reach all of our colleagues at firstname.lastname@{{ range_domain }}.</p>
+      <ul>
+      {% for u in vuln_staff_page_users %}
+        <li>{{ u.name }} – {{ u.title }} ({{ u.sam }}@{{ range_domain }})</li>
+      {% endfor %}
+      </ul></body></html>

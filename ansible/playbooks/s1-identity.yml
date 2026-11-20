@@ -1,0 +1,11 @@
+---
+# SentinelOne Singularity Identity / Ranger AD: host with service identity_connector (range.yaml) as AD connector.
+# Prerequisites: S1 agent on the connector (playbooks/agents.yml -e range_edr=sentinelone),
+# account svc.s1identity (playbooks/ad.yml --tags s1_identity, password S1_AD_PASSWORD).
+#   docker compose --env-file .env run --rm tools sh -c "cd ansible && ansible-playbook playbooks/s1-identity.yml"
+- name: SentinelOne Identity (AD connector)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: ../roles/sentinelone_identity

@@ -1,0 +1,70 @@
+---
+# Idempotent: only policies with a different mode are changed.
+
+- name: Check prerequisites
+  ansible.builtin.assert:
+    that:
+      - s1pol_console_url | length > 0
+      - s1pol_api_token | length > 0
+      - s1pol_site_id | length > 0
+      - s1pol_mitigation_mode in ['detect', 'protect']
+      - s1pol_mitigation_mode_suspicious in ['detect', 'protect']
+    fail_msg: Set S1_CONSOLE_URL, S1_API_TOKEN and S1_SITE_ID; mode detect or protect.
+    quiet: true
+
+- name: Common API parameters
+  ansible.builtin.set_fact:
+    s1pol_api: "{{ s1pol_console_url }}/web/api/v2.1"
+    s1pol_headers:
+      Authorization: "ApiToken {{ s1pol_api_token }}"
+    s1pol_want:
+      mitigationMode: "{{ s1pol_mitigation_mode }}"
+      mitigationModeSuspicious: "{{ s1pol_mitigation_mode_suspicious }}"
+      autoMitigationAction: "{{ s1pol_auto_mitigation_action }}"
+
+- name: Read groups of the site
+  ansible.builtin.uri:
+    url: "{{ s1pol_api }}/groups?siteIds={{ s1pol_site_id }}&limit=200"
+    headers: "{{ s1pol_headers }}"
+    return_content: true
+  register: s1pol_groups
+
+- name: Policy paths (site + non-inheriting groups)
+  ansible.builtin.set_fact:
+    s1pol_targets: >-
+      {%- set t = [{'name': 'Site', 'path': '/sites/' ~ s1pol_site_id ~ '/policy'}] -%}
+      {%- for g in s1pol_groups.json.data if not g.inherits -%}
+      {%- set _ = t.append({'name': 'Group ' ~ g.name, 'path': '/groups/' ~ g.id ~ '/policy'}) -%}
+      {%- endfor -%}{{ t }}
+
+- name: Read policies
+  ansible.builtin.uri:
+    url: "{{ s1pol_api }}{{ item.path }}"
+    headers: "{{ s1pol_headers }}"
+    return_content: true
+  loop: "{{ s1pol_targets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: s1pol_current
+
+- name: Set mode
+  vars:
+    s1pol_have: "{{ dict(s1pol_want.keys() | zip(s1pol_want.keys() | map('extract', item.json.data))) }}"
+  when: s1pol_have != s1pol_want
+  ansible.builtin.uri:
+    url: "{{ s1pol_api }}{{ item.item.path }}"
+    method: PUT
+    headers: "{{ s1pol_headers }}"
+    body_format: json
+    body: "{{ {'data': s1pol_want} }}"
+    return_content: true
+  loop: "{{ s1pol_current.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: true
+
+- name: Status
+  ansible.builtin.debug:
+    msg: >-
+      Agent policy {{ s1pol_targets | map(attribute='name') | join(', ') }}: Threats {{ s1pol_mitigation_mode }},
+      Suspicious {{ s1pol_mitigation_mode_suspicious }}, action {{ s1pol_auto_mitigation_action }}

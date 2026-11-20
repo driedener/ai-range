@@ -1,0 +1,11 @@
+---
+# TODO: install SQL Server 2022 Express idempotently.
+#   - download bootstrapper SQL2022-SSEI-Expr.exe, /ACTION=Download /MEDIATYPE=Core
+#   - Setup.exe /Q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=SQLEXPRESS
+#     /SQLSVCACCOUNT=RANGE\svc.sql /SQLSYSADMINACCOUNTS="RANGE\Domain Admins"
+#     /TCPENABLED=1 /IACCEPTSQLSERVERLICENSETERMS
+#   - idempotency via service MSSQL$SQLEXPRESS, firewall TCP 1433, fixed port
+#   - SPN for svc.sql only in the matching vuln_* profile (Kerberoasting)
+- name: SQL placeholder
+  ansible.builtin.debug:
+    msg: "SQL Server is not automated on {{ inventory_hostname }} yet (TODO in roles/sql)."

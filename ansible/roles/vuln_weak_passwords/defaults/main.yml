@@ -1,0 +1,15 @@
+---
+# Excerpt from ad_objects_users (not all – the page is a "team" teaser); contains the spray victims.
+vuln_staff_page_users:
+  - { name: Thomas Müller, title: Managing Director, sam: thomas.mueller }
+  - { name: Andreas Fischer, title: Head of Finance, sam: andreas.fischer }
+  - { name: Claudia Weber, title: Accountant, sam: claudia.weber }
+  - { name: Petra Klein, title: Head of HR, sam: petra.klein }
+  - { name: Markus Wolf, title: HR Specialist, sam: markus.wolf }
+  - { name: Jan Neumann, title: Head of Sales, sam: jan.neumann }
+  - { name: Tobias Krüger, title: Inside Sales, sam: tobias.krueger }
+  - { name: Anna Hofmann, title: Head of Marketing, sam: anna.hofmann }
+  - { name: Lisa Lange, title: Graphic Designer, sam: lisa.lange }
+  - { name: Martin Schmitt, title: Head of Engineering, sam: martin.schmitt }
+  - { name: Patrick Kaiser, title: Working Student, sam: patrick.kaiser }
+  - { name: Michael Schmidt, title: Head of IT, sam: michael.schmidt }

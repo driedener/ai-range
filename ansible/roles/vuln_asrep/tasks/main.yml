@@ -1,0 +1,25 @@
+---
+# Runs on the DC. AS-REP roasting (T1558.004): Kerberos preauth disabled, password from rockyou.
+- name: Weak password
+  microsoft.ad.user:
+    identity: "{{ item.sam }}"
+    password: "{{ item.password }}"
+    update_password: when_changed
+    state: present
+  loop: "{{ vuln_asrep_users }}"
+  loop_control:
+    label: "{{ item.sam }}"
+
+- name: "Do not require Kerberos preauthentication"
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Sam: "{{ item.sam }}"
+    script: |
+      param([string]$Sam)
+      $u = Get-ADUser $Sam -Properties DoesNotRequirePreAuth
+      $Ansible.Changed = -not $u.DoesNotRequirePreAuth
+      if ($Ansible.Changed) { Set-ADAccountControl -Identity $Sam -DoesNotRequirePreAuth $true }
+  loop: "{{ vuln_asrep_users }}"
+  loop_control:
+    label: "{{ item.sam }}"

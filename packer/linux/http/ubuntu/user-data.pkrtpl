@@ -1,0 +1,48 @@
+#cloud-config
+# Subiquity autoinstall for the template ubuntu2404.
+# Rendered by Packer via templatefile() and shipped on a NoCloud CD (label "cidata") that Packer
+# uploads to the ISO storage for the duration of the build. It contains the bcrypt hash of
+# RANGE_ADMIN_PASSWORD (never the plain password).
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: ${keyboard}
+  timezone: ${timezone}
+  refresh-installer:
+    update: false
+  network:
+    version: 2
+    ethernets:
+      primary:
+        match:
+          name: "e*"
+        dhcp4: true
+  storage:
+    layout:
+      name: direct
+  identity:
+    hostname: ubuntu2404
+    username: range
+    realname: Range Admin
+    password: "${password_hash}"
+  ssh:
+    install-server: true
+    allow-pw: true
+  packages:
+    - qemu-guest-agent
+    - cloud-init
+    - openssh-server
+    - curl
+    - ca-certificates
+  updates: security
+  late-commands:
+    - echo 'range ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/range
+    - chmod 0440 /target/etc/sudoers.d/range
+    # SSH password login for the Ansible bootstrap (sorts before 50-cloud-init.conf)
+    - printf 'PasswordAuthentication yes\n' > /target/etc/ssh/sshd_config.d/01-range.conf
+    # Do NOT set datasource_list here: Subiquity creates the user on first boot via
+    # datasource "None" (99-installer.cfg). The Proxmox datasource is only set by cleanup.sh.
+    - curtin in-target --target=/target -- systemctl enable ssh
+    - curtin in-target --target=/target -- systemctl enable qemu-guest-agent || true
+  shutdown: reboot

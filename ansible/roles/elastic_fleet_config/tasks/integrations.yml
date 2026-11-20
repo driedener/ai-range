@@ -1,0 +1,61 @@
+---
+# Attach additional integrations to existing agent policies.
+# Kibana preconfiguration (kibana.yml) does NOT add new package_policies to
+# already created preconfigured agent policies -> done via API here.
+# Inputs in "simplified" format: "<policy_template>-<input type>": {enabled}.
+
+- name: Query package versions of the extra integrations
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/epm/packages/{{ item.package }}"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _extra_pkgs
+  changed_when: false
+  loop: "{{ fleet_extra_integrations }}"
+  loop_control:
+    label: "{{ item.package }}"
+
+- name: Install extra packages
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/epm/packages/{{ item.item.package }}/{{ item.json.item.version }}"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body: {}
+    timeout: 300
+  when: item.json.item.status | default('') != 'installed'
+  changed_when: true
+  loop: "{{ _extra_pkgs.results }}"
+  loop_control:
+    label: "{{ item.item.package }}"
+
+- name: Read package policies (extra integrations)
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies?perPage=1000"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _pkg_policies_extra
+  changed_when: false
+
+- name: Create missing extra package policies
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body:
+      id: "{{ item.item.name }}"
+      name: "{{ item.item.name }}"
+      description: "{{ item.item.package }} (ai-range ansible)"
+      namespace: "{{ item.item.namespace | default(defend_namespace) }}"
+      policy_ids: "{{ item.item.agent_policies }}"
+      package:
+        name: "{{ item.item.package }}"
+        version: "{{ item.json.item.version }}"
+      inputs: "{{ item.item.inputs }}"
+    status_code: [200]
+    timeout: 300
+  when: >-
+    _pkg_policies_extra.json['items'] | selectattr('name', 'equalto', item.item.name) | list | length == 0
+  changed_when: true
+  loop: "{{ _extra_pkgs.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

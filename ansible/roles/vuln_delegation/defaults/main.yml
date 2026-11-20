@@ -1,0 +1,9 @@
+---
+vuln_delegation_unconstrained: "{{ groups['web'][0] }}"
+vuln_delegation_fs: "{{ groups['fileserver'][0] | lower }}"
+vuln_delegation_constrained:
+  sam: svc.web
+  to: ["cifs/{{ vuln_delegation_fs }}.{{ range_domain }}", "cifs/{{ vuln_delegation_fs | upper }}"]
+# last client (WS03): not the one on which vuln_local_admin creates the service with svc.backup
+vuln_delegation_rbcd_aces:
+  - { principal: GG_IT, target: "{{ groups['client'][-1] }}$", rights: GenericWrite }

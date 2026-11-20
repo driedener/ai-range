@@ -1,0 +1,4 @@
+# Optional: copy to terraform.tfvars. VMs, network, nodes and templates live in range.yaml (repo root).
+ssh_public_keys = [
+  # "ssh-ed25519 AAAA... range@controller",
+]

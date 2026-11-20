@@ -1,0 +1,25 @@
+# Identity attacks on AD and AD CS: from standard user via Kerberos, ACL and certificate attacks to
+# Domain Admin. Primarily tests SentinelOne Identity (ITDR) rather than endpoint detection.
+name: identity-attack
+description: From standard user to Domain Admin via AD and certificate attacks
+requires: [vuln_kerberoast, vuln_asrep, vuln_acl, vuln_dcsync, vuln_adcs]
+briefing: >-
+  You have the credentials of a normal domain user from the helpdesk. Focus on attacks
+  against Active Directory and the certificate authority (${RANGE_CA}), not on endpoint exploits.
+rules:
+  - You may crack captured hashes offline on ${RANGE_ATTACKER} (john/hashcat, wordlist rockyou).
+  - Revert any SPNs, ACEs and template changes you make in the next step. You do not need to revoke
+    issued certificates.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  CA_HOST: ${RANGE_CA}
+  DOMAIN_USER: lukas.schulz
+  DOMAIN_PASS: ${RANGE_USER_PASSWORD}
+objectives:
+  - Explore AD and AD CS (BloodHound paths, Kerberos weaknesses, certificate templates)
+  - Gain higher-privileged credentials via Kerberos or ACL attacks
+  - Attempt certificate-based privilege escalation (ESC1/ESC4/ESC8)
+  - Domain Admin rights or DCSync; prove it by read access to C$ on ${RANGE_DC} or the NTLM hash of krbtgt
+stealth: normal
+max_steps: 40

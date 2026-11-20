@@ -1,0 +1,187 @@
+---
+# --- Determine Kibana feature IDs -------------------------------------------
+# The Security features are versioned between 9.x minors (siem, siemV2,
+# siemV3, ...). We always take the highest available version.
+- name: Read Kibana features
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/features"
+    headers: "{{ kbn_headers }}"
+  register: _features
+  changed_when: false
+
+- name: Resolve feature IDs
+  ansible.builtin.set_fact:
+    range_kbn_feature: >-
+      {%- set ids = _features.json | map(attribute='id') | list -%}
+      {%- set res = {} -%}
+      {%- for prefix in ['siem', 'securitySolutionCases', 'securitySolutionTimeline', 'securitySolutionNotes'] -%}
+      {%-   set ns = namespace(best='', v=-1) -%}
+      {%-   for f in ids if f is match('^' ~ prefix ~ '(V[0-9]+)?$') -%}
+      {%-     set v = ((f | regex_replace('^' ~ prefix ~ 'V?', '')) or '1') | int -%}
+      {%-     if v > ns.v -%}{%- set ns.best = f -%}{%- set ns.v = v -%}{%- endif -%}
+      {%-   endfor -%}
+      {%-   if ns.best -%}{%- set _ = res.update({prefix: ns.best}) -%}{%- endif -%}
+      {%- endfor -%}
+      {%- for fixed in ['actions', 'fleetv2', 'fleet'] -%}
+      {%-   if fixed in ids -%}{%- set _ = res.update({fixed: fixed}) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ res }}
+
+- name: Security feature must be present
+  ansible.builtin.assert:
+    that:
+      - "'siem' in range_kbn_feature"
+      - "'securitySolutionCases' in range_kbn_feature"
+    fail_msg: "Kibana features siem*/securitySolutionCases* not found: {{ range_kbn_feature }}"
+    quiet: true
+
+- name: Assemble role definitions
+  ansible.builtin.set_fact:
+    range_roles:
+      - name: range_blue
+        body:
+          description: "AI-Range Blue Agent: reads telemetry/alerts, NO access to ground truth"
+          elasticsearch:
+            cluster: []
+            run_as: []
+            indices: "{{ range_blue_indices }}"
+          kibana:
+            - base: []
+              spaces: ["*"]
+              feature: >-
+                {%- set siem_privs = (['minimal_all'] + range_blue_siem_subfeatures) if range_blue_siem_subfeatures else ['all'] -%}
+                {%- set f = {range_kbn_feature.siem: siem_privs, range_kbn_feature.securitySolutionCases: ['all']} -%}
+                {%- if 'securitySolutionTimeline' in range_kbn_feature -%}{%- set _ = f.update({range_kbn_feature.securitySolutionTimeline: ['all']}) -%}{%- endif -%}
+                {%- if 'securitySolutionNotes' in range_kbn_feature -%}{%- set _ = f.update({range_kbn_feature.securitySolutionNotes: ['all']}) -%}{%- endif -%}
+                {%- for x in ['actions', 'fleetv2', 'fleet'] if x in range_kbn_feature -%}{%- set _ = f.update({x: ['read']}) -%}{%- endfor -%}
+                {{ f | combine(range_blue_extra_kibana_features) }}
+      - name: range_red
+        body:
+          description: "AI-Range Red Agent: only writes ground truth and agent traces"
+          elasticsearch:
+            cluster: []
+            run_as: []
+            indices: "{{ range_red_indices }}"
+          kibana: >-
+            {{ [{'base': [], 'spaces': ['*'], 'feature': range_red_extra_kibana_features}]
+               if range_red_extra_kibana_features else [] }}
+      - name: range_orchestrator
+        body:
+          description: "AI-Range Orchestrator: read/write range-*, read logs-*/alerts"
+          elasticsearch:
+            cluster: []
+            run_as: []
+            indices: "{{ range_orchestrator_indices }}"
+          kibana:
+            - base: []
+              spaces: ["*"]
+              feature: >-
+                {%- set f = {range_kbn_feature.siem: ['read'], range_kbn_feature.securitySolutionCases: ['read']} -%}
+                {%- for x in ['fleetv2', 'fleet'] if x in range_kbn_feature -%}{%- set _ = f.update({x: ['read']}) -%}{%- endfor -%}
+                {{ f | combine(range_orchestrator_extra_kibana_features) }}
+
+# --- Roles (Kibana Role API: ES + Kibana part in one object) ----------------
+- name: Read roles
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/security/role/{{ item.name }}"
+    headers: "{{ kbn_headers }}"
+    status_code: [200, 404]
+  register: _roles_current
+  changed_when: false
+  loop: "{{ range_roles }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create/update roles
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/security/role/{{ item.item.name }}"
+    method: PUT
+    headers: "{{ kbn_headers }}"
+    body_format: json
+    body: "{{ item.item.body }}"
+    status_code: [204]
+  when: >-
+    item.status == 404 or
+    lookup('ansible.builtin.template', 'role_normalize.j2', template_vars={'r': item.json})
+      != lookup('ansible.builtin.template', 'role_normalize.j2', template_vars={'r': item.item.body})
+  changed_when: true
+  loop: "{{ _roles_current.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# --- User (ES Security API) --------------------------------------------------
+- name: Read users
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_security/user/{{ item.username }}"
+    status_code: [200, 404]
+  register: _users_current
+  changed_when: false
+  loop: "{{ range_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Create users
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_security/user/{{ item.item.username }}"
+    method: PUT
+    body_format: json
+    body:
+      password: "{{ lookup('env', item.item.password_env) }}"
+      roles: ["{{ item.item.role }}"]
+      full_name: "{{ item.item.full_name }}"
+      metadata:
+        managed_by: ai-range
+  when: item.status == 404
+  changed_when: true
+  no_log: true
+  loop: "{{ _users_current.results }}"
+  loop_control:
+    label: "{{ item.item.username }}"
+
+- name: Reconcile user roles/names (password stays unchanged)
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_security/user/{{ item.item.username }}"
+    method: PUT
+    body_format: json
+    body:
+      roles: ["{{ item.item.role }}"]
+      full_name: "{{ item.item.full_name }}"
+      metadata:
+        managed_by: ai-range
+  when:
+    - item.status == 200
+    - >-
+      (item.json[item.item.username].roles | sort) != [item.item.role] or
+      item.json[item.item.username].full_name | default('') != item.item.full_name
+  changed_when: true
+  loop: "{{ _users_current.results }}"
+  loop_control:
+    label: "{{ item.item.username }}"
+
+# Detect password drift: test login with the env password, reset it on 401.
+- name: Check user passwords
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_security/_authenticate"
+    url_username: "{{ item.username }}"
+    url_password: "{{ lookup('env', item.password_env) }}"
+    status_code: [200, 401]
+  register: _users_auth
+  changed_when: false
+  no_log: true
+  loop: "{{ range_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Set password (if different)
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_security/user/{{ item.item.username }}/_password"
+    method: POST
+    body_format: json
+    body:
+      password: "{{ lookup('env', item.item.password_env) }}"
+  when: item.status == 401
+  changed_when: true
+  no_log: true
+  loop: "{{ _users_auth.results }}"
+  loop_control:
+    label: "{{ item.item.username }}"

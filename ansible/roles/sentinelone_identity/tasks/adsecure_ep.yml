@@ -1,0 +1,33 @@
+---
+# AD Secure EP (client policy): only check the mode. Setting it via API is not possible – createPolicy/updatePolicy reject
+# every engine configuration with "No rules are configured for the AD Secure EP policy" (as of 11/2026).
+
+- name: Find AD Secure EP policy
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getPolicy?siteIds={{ s1id_site_id }}&limit=50"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_ep_list
+
+- name: Read AD Secure EP policy
+  vars:
+    s1id_ep_id: "{{ (s1id_ep_list.json.data | selectattr('name', 'equalto', s1id_ep_policy_name) | map(attribute='id') | list + [''])[0] }}"
+  when: s1id_ep_id | length > 0
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getIdentityPolicyDetails?siteIds={{ s1id_site_id }}&policyId={{ s1id_ep_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_ep_details
+
+- name: AD Secure EP mode
+  vars:
+    s1id_ep_engine: >-
+      {{ (s1id_ep_details.json.data.engineConfigurations | default([])
+          | selectattr('engineType', 'equalto', 'AD_SECURE_EP') | list + [{}])[0] }}
+    s1id_ep_current: "{{ (s1id_ep_engine.adSecureEPProfileObject | default({})).actionTypeEP | default('missing') }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ s1id_ep_policy_name }}: AD Secure EP {{ s1id_ep_current }}
+      {{ '(ok)' if s1id_ep_current == s1id_ep_action else
+         '– DEVIATION, expected ' ~ s1id_ep_action ~ ': change it in the console (Singularity Identity → Policies → '
+         ~ s1id_ep_policy_name ~ '), not possible via API' }}

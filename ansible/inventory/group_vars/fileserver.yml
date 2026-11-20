@@ -1,0 +1,4 @@
+---
+# 5145: file access on shares (share/file enumeration, T1083/T1039)
+win_base_audit_policy_extra:
+  - { subcategory: Detailed File Share, audit_type: [success, failure] }

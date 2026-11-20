@@ -1,0 +1,84 @@
+---
+# Enterprise root CA on CA01. Install-AdcsCertificationAuthority needs
+# Enterprise Admin rights -> via become (runas) as domain administrator.
+- name: Install ADCS role
+  ansible.windows.win_feature:
+    name: ADCS-Cert-Authority
+    include_management_tools: true
+    state: present
+
+- name: Configure enterprise root CA
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      CommonName: "{{ adcs_ca_common_name }}"
+      KeyLength: "{{ adcs_key_length }}"
+      ValidityYears: "{{ adcs_validity_years }}"
+    script: |
+      param([string]$CommonName, [int]$KeyLength, [int]$ValidityYears)
+      $cfg = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -Name Active -ErrorAction SilentlyContinue
+      if ($cfg -and $cfg.Active) {
+        $Ansible.Changed = $false
+        return
+      }
+      Install-AdcsCertificationAuthority -CAType EnterpriseRootCA `
+        -CACommonName $CommonName `
+        -CryptoProviderName 'RSA#Microsoft Software Key Storage Provider' `
+        -KeyLength $KeyLength -HashAlgorithmName SHA256 `
+        -ValidityPeriod Years -ValidityPeriodUnits $ValidityYears `
+        -Force | Out-Null
+      $Ansible.Changed = $true
+  become: true
+  become_method: ansible.builtin.runas
+  vars:
+    ansible_become_user: "{{ range_domain_admin_user }}"
+    ansible_become_password: "{{ range_domain_admin_password }}"
+
+- name: CertSvc is running
+  ansible.windows.win_service:
+    name: CertSvc
+    state: started
+    start_mode: auto
+
+# CA auditing (4886/4887/4888/4898 …): without AuditFilter the CA writes no events despite
+# the audit subcategory "Certification Services" -> ESC1/Certipy invisible.
+- name: Set CA AuditFilter
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Filter: "{{ adcs_audit_filter }}"
+    script: |
+      param([int]$Filter)
+      $base = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration'
+      $ca = (Get-ItemProperty -Path $base -Name Active).Active
+      $cur = (Get-ItemProperty -Path "$base\$ca" -Name AuditFilter -ErrorAction SilentlyContinue).AuditFilter
+      if ($cur -eq $Filter) { $Ansible.Changed = $false; return }
+      Set-ItemProperty -Path "$base\$ca" -Name AuditFilter -Value $Filter -Type DWord
+      Restart-Service CertSvc
+      $Ansible.Changed = $true
+
+- name: Web Enrollment
+  when: adcs_web_enrollment | bool
+  block:
+    - name: Install Web Enrollment feature
+      ansible.windows.win_feature:
+        name: ADCS-Web-Enrollment
+        include_management_tools: true
+        state: present
+
+    - name: Configure Web Enrollment
+      ansible.windows.win_powershell:
+        error_action: stop
+        script: |
+          Import-Module WebAdministration
+          if (Get-WebApplication -Site 'Default Web Site' -Name 'CertSrv') {
+            $Ansible.Changed = $false
+            return
+          }
+          Install-AdcsWebEnrollment -Force | Out-Null
+          $Ansible.Changed = $true
+      become: true
+      become_method: ansible.builtin.runas
+      vars:
+        ansible_become_user: "{{ range_domain_admin_user }}"
+        ansible_become_password: "{{ range_domain_admin_password }}"

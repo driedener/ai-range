@@ -1,0 +1,187 @@
+---
+# Create or align and activate the Conditional Access policy (CAPOLICY). Idempotent.
+# API quirks (determined live, not documented in the Swagger):
+#  - duplicatePolicy on the default CA policy fails ("addToRiskyGroup is marked non-null but is null");
+#    createPolicy with engineConfigurationInput[{engineType: CONDITIONAL_ACCESS, caConfig: {…}}] works.
+#  - Exceptions (CAPExceptionInput): {type, subType, values, domains}; type API | IDENTITY (subType USERS|GROUPS)
+#    | NETWORK_ENTITY_SOURCE | NETWORK_ENTITY_TARGET (subType HOSTNAME|IP_ADDRESS|IP_ADDRESS_RANGE).
+#  - Only the default CA policy returns the list of known attacks (attackList with name/category).
+
+- name: CA – read policies
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getPolicy?siteIds={{ s1id_site_id }}&limit=50"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_ca_list
+
+- name: CA – determine default policy and own policy
+  ansible.builtin.set_fact:
+    s1id_ca_default_id: >-
+      {{ (s1id_ca_list.json.data | selectattr('policyType', 'equalto', 'CAPOLICY')
+          | selectattr('name', 'match', '^default_policy_') | map(attribute='id') | list + [''])[0] }}
+    s1id_ca_existing: >-
+      {{ (s1id_ca_list.json.data | selectattr('name', 'equalto', s1id_ca_policy_name) | list + [{}])[0] }}
+
+- name: CA – default policy present
+  ansible.builtin.assert:
+    that: s1id_ca_default_id | length > 0
+    fail_msg: No default CA policy in the site – complete the Identity onboarding wizard once (docs/sentinelone.md).
+    quiet: true
+
+- name: CA – read attack list from the default policy
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getIdentityPolicyDetails?siteIds={{ s1id_site_id }}&policyId={{ s1id_ca_default_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_ca_default
+
+- name: CA – desired configuration
+  vars:
+    s1id_ca_known: >-
+      {{ s1id_ca_default.json.data.engineConfigurations | selectattr('engineType', 'equalto', 'CONDITIONAL_ACCESS')
+         | map(attribute='caConfig') | map(attribute='attackBasedRules') | flatten
+         | map(attribute='attackList') | flatten | unique(attribute='name') | list }}
+    s1id_ca_attacks: >-
+      {{ s1id_ca_known if not s1id_ca_attack_types
+         else s1id_ca_known | selectattr('name', 'in', s1id_ca_attack_types) | list }}
+    s1id_ca_ips: "{{ s1id_ca_exception_ips | select | list }}"
+  ansible.builtin.set_fact:
+    s1id_ca_unknown: "{{ s1id_ca_attack_types | difference(s1id_ca_known | map(attribute='name')) }}"
+    s1id_ca_want:
+      domain: "{{ s1id_domain }}"
+      domains: ["{{ s1id_domain }}"]
+      projectableDomains: ["{{ s1id_domain }}"]
+      domainScoped: true
+      includeAllSubdomains: false
+      triggerBasedRules: []
+      advancedSettings:
+        blockADTrafficTime: "{{ s1id_ca_block_minutes | int }}"
+        mfaRequestTimeout: 30
+        identityVerificationInterval: EVERY_TIME
+        deniedAccessRaiseAlert: true
+        deniedAuthenticationInterval: 15
+        removeFromRiskyGroupAfter: 15
+        ruleMatchRaiseEvent: true
+        mfaConnectorType: NONE
+        addToRiskyGroup: [ON_DENIED_AUTHENTICATION]
+        idpOverride: false
+        mfaFailureBehavior: ALLOW
+      attackBasedRules:
+        - ruleName: "{{ s1id_ca_rule_name }}"
+          ruleDescription: "AD attacks against {{ s1id_dc_fqdn }} ({{ s1id_ca_response_action }})"
+          responseAction: "{{ s1id_ca_response_action }}"
+          attackTypes: "{{ s1id_ca_attacks | map(attribute='name') | list }}"
+          attackList: "{{ s1id_ca_attacks }}"
+          projectableDomains: []
+          exceptions: >-
+            {{ [{'type': 'NETWORK_ENTITY_SOURCE', 'subType': 'IP_ADDRESS', 'values': s1id_ca_ips,
+                 'domains': [s1id_domain]}] if s1id_ca_ips else [] }}
+
+- name: CA – unknown attacks
+  ansible.builtin.assert:
+    that: s1id_ca_unknown | length == 0
+    fail_msg: "s1id_ca_attack_types contains unknown attacks: {{ s1id_ca_unknown }}"
+    quiet: true
+
+- name: CA – read existing policy
+  when: s1id_ca_existing.id is defined
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getIdentityPolicyDetails?siteIds={{ s1id_site_id }}&policyId={{ s1id_ca_existing.id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_ca_current
+
+- name: CA – current configuration
+  ansible.builtin.set_fact:
+    s1id_ca_cur_cfg: >-
+      {{ (s1id_ca_current.json.data.engineConfigurations | default([])
+          | selectattr('engineType', 'equalto', 'CONDITIONAL_ACCESS') | map(attribute='caConfig') | list + [{}])[0] }}
+
+- name: CA – current rule
+  ansible.builtin.set_fact:
+    s1id_ca_cur_rule: >-
+      {{ (s1id_ca_cur_cfg.attackBasedRules | default([]) | selectattr('ruleName', 'equalto', s1id_ca_rule_name)
+          | list + s1id_ca_cur_cfg.attackBasedRules | default([]) + [{}])[0] }}
+
+# Compare only the fields the role controls (the API adds IDs and derived values)
+- name: CA – determine drift
+  vars:
+    s1id_ca_want_rule: "{{ s1id_ca_want.attackBasedRules[0] }}"
+  ansible.builtin.set_fact:
+    s1id_ca_drift: >-
+      {{ s1id_ca_existing.id is not defined
+         or (s1id_ca_cur_cfg.attackBasedRules | default([]) | length) != 1
+         or s1id_ca_cur_rule.responseAction | default('') != s1id_ca_want_rule.responseAction
+         or (s1id_ca_cur_rule.attackTypes | default([]) | sort) != (s1id_ca_want_rule.attackTypes | sort)
+         or (s1id_ca_cur_rule.exceptions | default([]) | map(attribute='values') | flatten | sort)
+            != (s1id_ca_want_rule.exceptions | map(attribute='values') | flatten | sort)
+         or (s1id_ca_cur_cfg.advancedSettings | default({})).blockADTrafficTime | default(0) | int
+            != s1id_ca_block_minutes | int }}
+
+# updatePolicy requires the IDs of caConfig, advancedSettings and the rule ("ID must not be null");
+# exceptions may come without ID (they are created anew).
+- name: CA – create or align policy
+  when: s1id_ca_drift | bool
+  vars:
+    s1id_ca_body_cfg: >-
+      {{ s1id_ca_want if s1id_ca_existing.id is not defined else s1id_ca_want | combine({
+           'id': s1id_ca_cur_cfg.id,
+           'advancedSettings': s1id_ca_want.advancedSettings | combine({'id': s1id_ca_cur_cfg.advancedSettings.id}),
+           'attackBasedRules': [s1id_ca_want.attackBasedRules[0] | combine({'id': s1id_ca_cur_rule.id})]}) }}
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/{{ 'updatePolicy' if s1id_ca_existing.id is defined else 'createPolicy' }}"
+    method: POST
+    headers: "{{ s1id_headers }}"
+    body_format: json
+    body: >-
+      {{ {'filter': s1id_filter,
+          'input': ({'policyId': s1id_ca_existing.id} if s1id_ca_existing.id is defined else {}) | combine({
+            'name': s1id_ca_policy_name, 'description': 'Conditional Access for ' ~ s1id_domain ~ ' (ai-range)',
+            'policyType': 'CAPOLICY', 'deployedOnServer': false, 'loggedInUser': 'ai-range',
+            'engineConfigurationInput': [{'engineType': 'CONDITIONAL_ACCESS', 'enabled': true,
+                                          'caConfig': s1id_ca_body_cfg}]})} }}
+    return_content: true
+  register: s1id_ca_saved
+  changed_when: true
+
+- name: CA – policy ID
+  ansible.builtin.set_fact:
+    s1id_ca_id: "{{ s1id_ca_existing.id | default(s1id_ca_saved.json.data.policyId | default('')) }}"
+
+# Only one CA policy may be active per site ("active policy for CONDITIONAL_ACCESS already exists")
+- name: CA – deactivate other active CA policy
+  vars:
+    s1id_ca_others: >-
+      {{ s1id_ca_list.json.data | selectattr('policyType', 'equalto', 'CAPOLICY')
+         | selectattr('policyStatus', 'equalto', 'ACTIVE') | rejectattr('id', 'equalto', s1id_ca_id)
+         | map(attribute='id') | list }}
+  when:
+    - s1id_ca_existing.policyStatus | default('') != 'ACTIVE'
+    - s1id_ca_others | length > 0
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/deactivatingPolicy"
+    method: POST
+    headers: "{{ s1id_headers }}"
+    body_format: json
+    body: "{{ {'filter': s1id_filter, 'input': {'policyIds': s1id_ca_others, 'loggedInUser': 'ai-range', 'override': false}} }}"
+    return_content: true
+  changed_when: true
+
+- name: CA – activate policy
+  when: s1id_ca_existing.policyStatus | default('') != 'ACTIVE'
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/activatingPolicy"
+    method: POST
+    headers: "{{ s1id_headers }}"
+    body_format: json
+    body: "{{ {'filter': s1id_filter, 'input': {'policyIds': [s1id_ca_id], 'loggedInUser': 'ai-range', 'override': false}} }}"
+    return_content: true
+  changed_when: true
+
+- name: CA – Status
+  ansible.builtin.debug:
+    msg: >-
+      {{ s1id_ca_policy_name }}: {{ s1id_ca_want.attackBasedRules[0].attackTypes | length }} attacks →
+      {{ s1id_ca_response_action }} ({{ s1id_ca_block_minutes }} min), exceptions
+      {{ s1id_ca_want.attackBasedRules[0].exceptions | map(attribute='values') | flatten | join(', ') or '–' }}
+      {{ '– aligned' if s1id_ca_drift | bool else '– unchanged' }}

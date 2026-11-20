@@ -1,0 +1,43 @@
+---
+fileserver_root: C:\Shares\Data
+vuln_data_archive_root: C:\Shares\Archive
+vuln_data_archive_share: Archive
+vuln_data_archive_files: 300
+
+# Fictional content (names from ad_objects, IBANs with check digits 00 = invalid)
+vuln_data_files:
+  - dir: Finance
+    name: Payroll_2026.csv
+    content: |
+      EmployeeID;Name;Department;GrossSalary_EUR
+      1001;Thomas Müller;Management;14500
+      1007;Andreas Fischer;Finance;8900
+      1008;Claudia Weber;Finance;4700
+      1009;Stefan Meyer;Finance;5600
+      1012;Petra Klein;HR;7800
+      1015;Jan Neumann;Sales;8200
+      1023;Martin Schmitt;Engineering;9100
+  - dir: Finance
+    name: Vendor_Bank_Details.csv
+    content: |
+      Vendor;IBAN;BIC
+      Schulze Office Supplies Ltd;DE00 1234 5678 9012 3456 78;TESTDEFFXXX
+      North IT Systems Inc;DE00 8765 4321 0987 6543 21;TESTDEFFXXX
+      Sparkle Cleaning Services;DE00 1111 2222 3333 4444 55;TESTDEFFXXX
+  - dir: Finance
+    name: Annual_Report_2025_DRAFT.txt
+    content: |
+      Range Corp – Annual Financial Statements 2025 (draft, confidential)
+      Revenue: EUR 48.2M | EBIT: EUR 5.1M | Cash: EUR 7.9M
+      Note: acquisition talks with Example Inc are ongoing (Project "Northern Light") – do not share.
+  - dir: HR
+    name: Layoffs_Q1_2027.txt
+    content: |
+      Confidential – planned headcount reductions Q1/2027 (draft, fictional)
+      Sales: 2 positions | Marketing: 1 position
+  - dir: IT
+    name: Network_Plan.txt
+    content: |
+      Range Corp – Network (as of 2026)
+      Server: {{ (groups['dc'] + groups['server']) | join(', ') }} | Clients: {{ groups['client'] | join(', ') }} | Linux: {{ groups['linux_server'] | join(', ') }}
+      Backups: service account svc.backup (password is in the password safe, do not store it here!)

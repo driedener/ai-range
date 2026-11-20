@@ -1,0 +1,59 @@
+---
+# SentinelOne Singularity Identity / Ranger AD: AD connector + AD configuration via the management API.
+# Runs on localhost (tools container). Prerequisites: S1 agent on the connector host,
+# AD account from roles/ad_objects (svc.s1identity, password S1_AD_PASSWORD).
+
+s1id_console_url: "{{ lookup('env', 'S1_CONSOLE_URL') | regex_replace('/+$', '') }}"
+s1id_api_token: "{{ lookup('env', 'S1_API_TOKEN') }}"
+s1id_site_id: "{{ lookup('env', 'S1_SITE_ID') }}"
+
+# Connector: Windows member server with S1 agent (not a DC). May be isolated – most
+# Identity functions keep working anyway.
+# Default: host with service identity_connector in range.yaml
+s1id_connector_host: "{{ groups['identity_connector'] | default([]) | first | default('') }}"
+
+s1id_domain: "{{ range_domain }}"
+s1id_dc_fqdn: "{{ range_dc_fqdn }}"
+s1id_encryption: LDAPS             # LDAPS (636, DC certificate from the enterprise CA) | LDAP (389)
+s1id_user: "svc.s1identity@{{ range_domain }}"
+s1id_password: "{{ lookup('env', 'S1_AD_PASSWORD') }}"
+# SINGULARITY_IDENTITY = Threat Detection, RANGER_AD = Assessment, RANGER_AD_PROTECT = ISIDP/AD Protect
+s1id_features: [SINGULARITY_IDENTITY, RANGER_AD, RANGER_AD_PROTECT]
+# WinRM from the connector to the DCs over HTTPS (5986; listener + firewall: roles/ad_objects, tag s1_identity)
+s1id_use_winrm_ssl: true
+s1id_enable_threat_detection: true
+s1id_ad_sync: true
+
+# Daily AD refresh
+s1id_refresh_hour: 3
+s1id_refresh_minute: 0
+# IANA time zone of the daily AD refresh; defaults to range.yaml locale.timezone
+s1id_time_zone: "{{ range_timezone_linux | default('Etc/UTC') }}"
+
+# Identity policies to activate (by name – copies return no policyType in getPolicy).
+# The wizard's default policies cannot be activated; the ai-range policies are copies of them
+# (duplicatePolicy), the DC policy with Ingestion, Compromised Credential Protection and Threat Detection.
+s1id_policy_names: ["ai-range DC", "ai-range Clients"]
+
+# Conditional Access (CAPOLICY, engine CONDITIONAL_ACCESS): blocks a source's AD traffic at the DC as soon as
+# Singularity Identity detects one of the attacks. Created or aligned via createPolicy/updatePolicy
+# and activated (tasks/conditional_access.yml). s1id_ca_enabled: false leaves an existing policy untouched.
+s1id_ca_enabled: true
+s1id_ca_policy_name: ai-range CA
+s1id_ca_rule_name: ai-range DC attacks
+s1id_ca_response_action: BLOCK      # BLOCK | AUDIT (log only)
+s1id_ca_block_minutes: 15           # how long the source's AD traffic stays blocked
+# Attacks of the rule (names like DC_SYNC_ATTACK, PASS_THE_HASH, LDAP_AD_SPN_SCAN …); empty = all that the
+# wizard's default CA policy knows (46 as of 11/2026)
+s1id_ca_attack_types: []
+# Exceptions (source IPs). Default: the Identity connector, which itself queries AD via LDAP. Account and
+# hostname exceptions (IDENTITY/USERS, HOSTNAME) are rejected by the API in this range – it resolves them via the
+# Ranger AD inventory, whose assessment fails here (see docs/sentinelone.md).
+s1id_ca_exception_ips:
+  - "{{ hostvars[s1id_connector_host].ansible_host | default('') if s1id_connector_host else '' }}"
+
+# AD Secure EP (client policy, engine AD_SECURE_EP): DETECT | DETECT_AND_PROTECT (console: Protect). Cannot be set via API
+# (createPolicy/updatePolicy: "No rules are configured for the AD Secure EP policy") – the role only checks the mode
+# and reports a deviation; change it in the console (Singularity Identity → Policies).
+s1id_ep_policy_name: ai-range Clients
+s1id_ep_action: DETECT_AND_PROTECT

@@ -1,0 +1,29 @@
+# Compromised workstation: an infostealer/phishing attachment has delivered the local support admin of a
+# client. Red works remotely on the client from Kali (as if over a C2 channel) – this tests
+# EDR detection on a managed endpoint. Blue should isolate the client, not just block Kali.
+name: workstation-beachhead
+description: Local admin on a workstation, spreading from there
+requires: [vuln_local_admin]
+briefing: >-
+  You have captured the credentials of the local administrator ($WS_ADMIN_USER) of workstation ${RANGE_CLIENT} (${RANGE_CLIENT_IP}).
+  Work as if you had a foot in the door there: commands on ${RANGE_CLIENT} (wmiexec, psexec, evil-winrm,
+  nxc --exec-method) rather than just scanning from outside. You do not have any domain credentials yet.
+rules:
+  - On ${RANGE_CLIENT} you may read credentials from memory and the registry (LSASS, SAM, LSA secrets).
+    Dumps only on ${RANGE_CLIENT} or in the working folder on ${RANGE_ATTACKER}; delete them afterwards.
+  - Do not install tools on ${RANGE_CLIENT} unless you remove them again in the same step.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  WS_HOST: ${RANGE_CLIENT}
+  WS_IP: ${RANGE_CLIENT_IP}
+  # same as vuln_local_admin_* in ansible/playbooks/vars/vulns.yml
+  WS_ADMIN_USER: itsupport
+  WS_ADMIN_PASS: Helpdesk2024!
+objectives:
+  - Gain a foothold on ${RANGE_CLIENT} and explore the host (users, sessions, services, network)
+  - Obtain credentials from the host (especially domain accounts)
+  - Lateral movement to further clients or servers
+  - If possible, Domain Admin rights; prove it by read access to C$ on ${RANGE_DC}
+stealth: normal
+max_steps: 40

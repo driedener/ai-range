@@ -1,0 +1,9 @@
+---
+adcs_ca_common_name: "{{ range_netbios }}-{{ inventory_hostname | upper }}-CA"
+adcs_key_length: 4096
+adcs_validity_years: 10
+# Web Enrollment (/certsrv) – off by default; possibly later for an ESC8 profile
+adcs_web_enrollment: false
+# CA audit filter (certutil -setreg CA\AuditFilter): 127 = all categories
+# (Start/Stop, Backup, Requests, Revocation, Security, Key Archival, Config)
+adcs_audit_filter: 127

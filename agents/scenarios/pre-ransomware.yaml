@@ -1,0 +1,30 @@
+# Ransomware precursor: the attacker is already Domain Admin and prepares the encryption.
+# NOTHING is encrypted or deleted – Red only simulates the typical preparation and
+# impact steps on an archive of dummy files. Intended for parallel mode (Blue's reaction time).
+name: pre-ransomware
+description: Domain Admin prepares ransomware (simulation, nothing is encrypted)
+requires: [vuln_data]
+briefing: >-
+  You already have the credentials of a Domain Admin. Simulate what a ransomware group does in the last
+  hours before encryption. The "encryption" itself is only a renaming of dummy files
+  in the share \\${RANGE_FILESERVER}\Archive.
+rules:
+  - Exception to "delete or encrypt nothing" – in the share \\${RANGE_FILESERVER}\Archive (and ONLY there)
+    you may rename files (e.g. append the extension .locked) and drop a ransom note (text file).
+    At the end, revert all renames and delete the note.
+  - Shadow copies, backups and security products may only be explored/listed (vssadmin list, wmic, Get-Service),
+    NEVER deleted, stopped or disabled.
+  - Distribution (GPO, scheduled tasks, PsExec) may at most be prepared and tested with a harmless command
+    (e.g. `whoami`); remove any created tasks/GPOs immediately.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  DOMAIN_USER: adm.hoffmann
+  DOMAIN_PASS: ${RANGE_TIER0_PASSWORD}
+objectives:
+  - Target selection - list important servers, shares and backup infrastructure
+  - Explore security products and shadow copies on the servers
+  - Prepare mass distribution and test it with a harmless command on several hosts
+  - Simulate impact - rename files in \\${RANGE_FILESERVER}\Archive and drop a note, then revert
+stealth: noisy
+max_steps: 30

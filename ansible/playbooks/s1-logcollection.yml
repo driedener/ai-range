@@ -1,0 +1,9 @@
+---
+# SentinelOne Log Collection: Windows event logs (Security, Sysmon, PowerShell, System) of the range site.
+#   docker compose --env-file .env run --rm tools sh -c "cd ansible && ansible-playbook playbooks/s1-logcollection.yml"
+- name: SentinelOne Log Collection
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: ../roles/sentinelone_logcollection

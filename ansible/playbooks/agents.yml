@@ -1,0 +1,19 @@
+---
+# EDR agent on Windows hosts and Linux servers (not on Kali/attacker).
+# range_edr (env AIRANGE_EDR): elastic (default) -> Elastic Agent + Defend via Fleet,
+#                              sentinelone      -> SentinelOne agent from sources/sentinelone/installer.
+# Elastic prerequisites: stack is running, Fleet policies range-windows/range-linux exist,
+# CA is in the system trust store via playbooks/base.yml.
+- name: Elastic Agent
+  hosts: windows:linux_server
+  gather_facts: false
+  roles:
+    - role: elastic_agent
+      when: range_edr == 'elastic'
+
+- name: SentinelOne agent
+  hosts: windows:linux_server
+  gather_facts: false
+  roles:
+    - role: sentinelone_agent
+      when: range_edr == 'sentinelone'

@@ -1,0 +1,77 @@
+---
+# Idempotent: create missing rules (by name), activate inactive ones.
+
+- name: Check prerequisites
+  ansible.builtin.assert:
+    that:
+      - s1lc_console_url | length > 0
+      - s1lc_api_token | length > 0
+      - s1lc_site_id | length > 0
+    fail_msg: Set S1_CONSOLE_URL, S1_API_TOKEN and S1_SITE_ID in the tools container.
+    quiet: true
+
+- name: Common API parameters
+  ansible.builtin.set_fact:
+    s1lc_api: "{{ s1lc_console_url }}/web/api/v2.1"
+    s1lc_headers:
+      Authorization: "ApiToken {{ s1lc_api_token }}"
+
+- name: Read existing log collection rules of the site
+  ansible.builtin.uri:
+    url: "{{ s1lc_api }}/log-collection/rules?siteIds={{ s1lc_site_id }}&agentType=windows&limit=200"
+    headers: "{{ s1lc_headers }}"
+    return_content: true
+  register: s1lc_existing
+
+- name: Create missing rules
+  vars:
+    s1lc_names: "{{ s1lc_existing.json.data | default([]) | map(attribute='name') | list }}"
+  when: item.name not in s1lc_names
+  ansible.builtin.uri:
+    url: "{{ s1lc_api }}/log-collection/rules"
+    method: POST
+    headers: "{{ s1lc_headers }}"
+    body_format: json
+    body: >-
+      {{ {'scopeId': s1lc_site_id | int, 'scopeLevel': 'site', 'name': item.name,
+          'description': item.description, 'agentType': 'windows',
+          'windowsParams': dict({'collectionType': 'windowsEventLog',
+                                 'collectionPathOrChannel': item.channel,
+                                 'collectXml': false},
+                                **({'eventIds': {'eventIds': item.event_ids}} if item.event_ids
+                                   else {'allEvents': {'welExcludedIds': []}}))} }}
+    status_code: [200, 201]
+    return_content: true
+  loop: "{{ s1lc_rules }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: s1lc_created
+  changed_when: true
+
+- name: Read rules again
+  ansible.builtin.uri:
+    url: "{{ s1lc_api }}/log-collection/rules?siteIds={{ s1lc_site_id }}&agentType=windows&limit=200"
+    headers: "{{ s1lc_headers }}"
+    return_content: true
+  register: s1lc_now
+
+- name: Activate inactive ai-range rules
+  vars:
+    s1lc_inactive: >-
+      {{ s1lc_now.json.data | default([]) | selectattr('name', 'in', s1lc_rules | map(attribute='name') | list)
+         | rejectattr('enabled', 'equalto', true) | map(attribute='id') | list }}
+  when: s1lc_inactive | length > 0
+  ansible.builtin.uri:
+    url: "{{ s1lc_api }}/log-collection/rules/activation"
+    method: POST
+    headers: "{{ s1lc_headers }}"
+    body_format: json
+    body: "{{ {'data': {'activate': true}, 'filter': {'ids': s1lc_inactive}} }}"
+    return_content: true
+  changed_when: true
+
+- name: Show status
+  ansible.builtin.debug:
+    msg: >-
+      {{ s1lc_now.json.data | default([]) | selectattr('name', 'in', s1lc_rules | map(attribute='name') | list)
+         | map(attribute='name') | list }}

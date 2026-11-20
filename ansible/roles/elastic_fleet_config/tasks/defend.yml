@@ -1,0 +1,158 @@
+---
+# Add Elastic Defend (package "endpoint") to the preconfigured agent policies
+# and set the protection modes via defend_mode.
+# Procedure according to https://www.elastic.co/docs/solutions/security/configure-elastic-defend/create-an-elastic-defend-policy-using-api
+# and the Kibana source (security_solution/server/fleet_integration/fleet_integration.ts):
+#   Create: input.type = ENDPOINT_INTEGRATION_CONFIG, config._config.value = {type, endpointConfig.preset}
+#   On creation Kibana replaces this with input.type = endpoint with
+#   config.{integration_config, artifact_manifest, policy}.
+
+- name: Check defend_mode
+  ansible.builtin.assert:
+    that:
+      - defend_mode in ['detect', 'prevent', 'off']
+      - defend_preset in ['DataCollection', 'NGAV', 'EDREssential', 'EDRComplete']
+    fail_msg: "defend_mode must be detect|prevent|off, defend_preset DataCollection|NGAV|EDREssential|EDRComplete."
+    quiet: true
+
+- name: Agent policies present? (preconfigured in kibana.yml)
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/agent_policies/{{ item }}"
+    headers: "{{ kbn_headers_versioned }}"
+    status_code: [200]
+  changed_when: false
+  loop: "{{ defend_agent_policies }}"
+
+- name: Query package endpoint
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/epm/packages/endpoint"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _endpoint_pkg
+  changed_when: false
+
+- name: Install package endpoint
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/epm/packages/endpoint/{{ _endpoint_pkg.json.item.version }}"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body: {}
+    timeout: 300
+  when: _endpoint_pkg.json.item.status | default('') != 'installed'
+  changed_when: true
+
+- name: Remember endpoint package version
+  ansible.builtin.set_fact:
+    defend_pkg_version: "{{ _endpoint_pkg.json.item.version }}"
+    defend_pkg_title: "{{ _endpoint_pkg.json.item.title | default('Elastic Defend') }}"
+
+- name: Read package policies
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies?perPage=1000"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _pkg_policies
+  changed_when: false
+
+- name: Create missing Defend package policies
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body:
+      name: "defend-{{ item }}"
+      description: "Elastic Defend for {{ item }} (ai-range ansible)"
+      namespace: "{{ defend_namespace }}"
+      policy_ids: ["{{ item }}"]
+      enabled: true
+      package:
+        name: endpoint
+        title: "{{ defend_pkg_title }}"
+        version: "{{ defend_pkg_version }}"
+      inputs:
+        - type: ENDPOINT_INTEGRATION_CONFIG
+          enabled: true
+          streams: []
+          config:
+            _config:
+              value:
+                type: endpoint
+                endpointConfig:
+                  preset: "{{ defend_preset }}"
+    status_code: [200]
+    timeout: 300
+  when: >-
+    _pkg_policies.json['items'] | selectattr('name', 'equalto', 'defend-' ~ item) | list | length == 0
+  changed_when: true
+  loop: "{{ defend_agent_policies }}"
+
+- name: Read package policies again
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies?perPage=1000"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _pkg_policies
+  changed_when: false
+
+- name: Determine Defend package policy IDs
+  ansible.builtin.set_fact:
+    defend_package_policy_ids: >-
+      {{ _pkg_policies.json['items']
+         | selectattr('package.name', 'equalto', 'endpoint')
+         | selectattr('name', 'in', defend_agent_policies | map('regex_replace', '^', 'defend-') | list)
+         | map(attribute='id') | list }}
+
+- name: Read Defend package policies individually
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies/{{ item }}"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _defend_policies
+  changed_when: false
+  loop: "{{ defend_package_policy_ids }}"
+
+# Only change protections that exist in the policy object and (if the field
+# is present) have supported != false. Under Basic, ransomware/
+# memory_protection/behavior_protection are supported=false + mode=off and must
+# not be changed (otherwise Kibana rejects the update due to the license).
+- name: "Set protection modes to '{{ defend_mode }}'"
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/package_policies/{{ pp.id }}"
+    method: PUT
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body:
+      name: "{{ pp.name }}"
+      description: "{{ pp.description | default('') }}"
+      namespace: "{{ pp.namespace | default(defend_namespace) }}"
+      policy_ids: "{{ pp.policy_ids | default([pp.policy_id]) }}"
+      enabled: "{{ pp.enabled }}"
+      package:
+        name: "{{ pp.package.name }}"
+        title: "{{ pp.package.title | default('Elastic Defend') }}"
+        version: "{{ pp.package.version }}"
+      inputs:
+        - type: endpoint
+          enabled: "{{ ep_input.enabled }}"
+          streams: "{{ ep_input.streams | default([]) }}"
+          config: "{{ ep_input.config | combine({'policy': {'value': new_policy}}) }}"
+      version: "{{ pp.version }}"
+    status_code: [200]
+  vars:
+    pp: "{{ item.json.item }}"
+    ep_input: "{{ pp.inputs | selectattr('type', 'equalto', 'endpoint') | first }}"
+    old_policy: "{{ ep_input.config.policy.value }}"
+    new_policy: >-
+      {%- set patch = {} -%}
+      {%- for os in defend_policy_os if os in old_policy -%}
+      {%-   set osp = {} -%}
+      {%-   for p in defend_protections
+              if p in old_policy[os] and (old_policy[os][p].supported | default(true)) -%}
+      {%-     set _ = osp.update({p: {'mode': defend_mode}}) -%}
+      {%-   endfor -%}
+      {%-   set _ = patch.update({os: osp}) -%}
+      {%- endfor -%}
+      {{ old_policy | combine(patch, recursive=True) }}
+  when: new_policy != old_policy
+  changed_when: true
+  loop: "{{ _defend_policies.results }}"
+  loop_control:
+    label: "{{ item.json.item.name }}"

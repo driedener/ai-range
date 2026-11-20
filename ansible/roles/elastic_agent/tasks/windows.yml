@@ -1,0 +1,48 @@
+---
+- name: Check Elastic Agent service
+  ansible.windows.win_service_info:
+    name: Elastic Agent
+  register: elastic_agent_win_service
+
+- name: Install Elastic Agent
+  when: not elastic_agent_win_service.exists
+  vars:
+    elastic_agent_pkg: "elastic-agent-{{ elastic_agent_version }}-windows-x86_64"
+  block:
+    - name: Create download directory
+      ansible.windows.win_file:
+        path: "{{ elastic_agent_win_tmp }}"
+        state: directory
+
+    - name: Download Elastic Agent
+      ansible.windows.win_get_url:
+        url: "{{ elastic_agent_artifacts_url }}/{{ elastic_agent_pkg }}.zip"
+        dest: "{{ elastic_agent_win_tmp }}\\{{ elastic_agent_pkg }}.zip"
+        force: false
+
+    - name: Unpack Elastic Agent
+      community.windows.win_unzip:
+        src: "{{ elastic_agent_win_tmp }}\\{{ elastic_agent_pkg }}.zip"
+        dest: "{{ elastic_agent_win_tmp }}"
+        creates: "{{ elastic_agent_win_tmp }}\\{{ elastic_agent_pkg }}\\elastic-agent.exe"
+
+    - name: Install Elastic Agent and enroll in Fleet
+      ansible.windows.win_command: >-
+        "{{ elastic_agent_win_tmp }}\{{ elastic_agent_pkg }}\elastic-agent.exe" install --non-interactive
+        --url={{ elastic_agent_fleet_url }}
+        --enrollment-token={{ elastic_agent_enrollment_token }}
+        {{ elastic_agent_install_extra_args }}
+      args:
+        chdir: "{{ elastic_agent_win_tmp }}\\{{ elastic_agent_pkg }}"
+      no_log: true
+
+    - name: Remove installation files
+      ansible.windows.win_file:
+        path: "{{ elastic_agent_win_tmp }}"
+        state: absent
+
+- name: Elastic Agent service is running
+  ansible.windows.win_service:
+    name: Elastic Agent
+    state: started
+    start_mode: auto

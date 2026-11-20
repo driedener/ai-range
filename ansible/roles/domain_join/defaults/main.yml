@@ -1,0 +1,5 @@
+---
+# server -> OU=Servers, client -> OU=Workstations (OUs are created by ad_objects).
+# The OU is only set at join time; already joined computers are not moved.
+domain_join_ou: >-
+  {{ ('OU=Workstations,' if 'client' in group_names else 'OU=Servers,') ~ range_domain_dn }}

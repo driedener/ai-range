@@ -1,0 +1,20 @@
+# Assumed breach: the attacker has network access (attacker VM in the range network) and the credentials
+# of a normal domain user (e.g. from phishing). Goal: Domain Admin or access to finance data.
+name: assumed-breach
+description: Internal attacker with a stolen standard user account
+# Credentials end up as environment variables on the attacker VM (not in the prompt / in the logs).
+# ${RANGE_*} comes from range.yaml (RANGE_DOMAIN, RANGE_DC, RANGE_DC_IP, RANGE_FILESERVER …), the rest from docker/.env.
+credentials:
+  DOMAIN: ${RANGE_DOMAIN}
+  DC_IP: ${RANGE_DC_IP}
+  DOMAIN_USER: lukas.schulz
+  DOMAIN_PASS: ${RANGE_USER_PASSWORD}
+objectives:
+  - Explore the environment (hosts, services, AD structure, privileged accounts)
+  - Obtain credentials with higher privileges
+  - Lateral movement to at least one server
+  - If possible, Domain Admin rights; prove it by read access to C$ on ${RANGE_DC}
+  - Find the finance department's data on ${RANGE_FILESERVER} (only list it, exfiltrate nothing)
+# Noise level: noisy | normal | stealthy
+stealth: normal
+max_steps: 40

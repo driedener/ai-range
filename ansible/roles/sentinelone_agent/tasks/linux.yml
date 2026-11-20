@@ -1,0 +1,46 @@
+---
+- name: Gather services
+  ansible.builtin.service_facts:
+
+- name: Install SentinelOne
+  when: (sentinelone_linux_service ~ '.service') not in ansible_facts.services
+  become: true
+  vars:
+    sentinelone_deb: "{{ sentinelone_linux_tmp }}/{{ sentinelone_installer_linux | basename }}"
+  block:
+    - name: Create target directory
+      ansible.builtin.file:
+        path: "{{ sentinelone_linux_tmp }}"
+        state: directory
+        mode: "0700"
+
+    - name: Copy package
+      ansible.builtin.copy:
+        src: "{{ sentinelone_installer_linux }}"
+        dest: "{{ sentinelone_deb }}"
+        mode: "0600"
+
+    - name: Install package
+      ansible.builtin.apt:
+        deb: "{{ sentinelone_deb }}"
+
+    - name: Set site token
+      ansible.builtin.command: "{{ sentinelone_sentinelctl }} management token set {{ sentinelone_site_token }}"
+      changed_when: true
+      no_log: true
+
+    - name: Start agent
+      ansible.builtin.command: "{{ sentinelone_sentinelctl }} control start"
+      changed_when: true
+
+    - name: Remove package
+      ansible.builtin.file:
+        path: "{{ sentinelone_linux_tmp }}"
+        state: absent
+
+- name: SentinelOne service is running
+  ansible.builtin.systemd_service:
+    name: "{{ sentinelone_linux_service }}"
+    state: started
+    enabled: true
+  become: true

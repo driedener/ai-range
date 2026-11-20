@@ -1,0 +1,9 @@
+---
+sysmon_dir: C:\ProgramData\ai-range\sysmon
+sysmon_zip_url: https://download.sysinternals.com/files/Sysmon.zip
+# olafhartong/sysmon-modular – prebuilt default config (since 2025 only available as a release asset)
+sysmon_config_url: https://github.com/olafhartong/sysmon-modular/releases/latest/download/sysmonconfig.xml
+sysmon_service_name: Sysmon64
+# Downloads run once on the controller (tools container) and are copied to the VMs:
+# the member servers have no DNS yet during the base phase (DC01 only becomes the DNS server afterwards).
+sysmon_cache_dir: "{{ role_path }}/../../.cache/sysmon"

@@ -1,0 +1,4 @@
+claude-agent-sdk==0.2.182
+httpx==0.28.1
+asyncssh==2.24.1
+pyyaml==6.0.3

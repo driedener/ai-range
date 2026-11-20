@@ -1,0 +1,68 @@
+{
+  "index_patterns": ["{{ range_agenttrace_stream }}*"],
+  "data_stream": {},
+  "priority": 500,
+  "version": {{ range_template_version | int }},
+  "_meta": {
+    "managed_by": "ai-range ansible elastic_fleet_config",
+    "description": "Tool calls/LLM traces of all agents (red|blue|engineer). Outside of logs-* so range_blue cannot read red traces."
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "{{ range_ilm_policy }}",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": {{ range_index_replicas | int }}
+    },
+    "mappings": {
+      "dynamic": true,
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "message": { "type": "match_only_text" },
+        "run": {
+          "properties": {
+            "id": { "type": "keyword" }
+          }
+        },
+        "agent": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "role": { "type": "keyword" }
+          }
+        },
+        "tool": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "input": { "type": "flattened", "ignore_above": 8191 },
+            "input_raw": { "type": "match_only_text" },
+            "output": { "type": "text", "index": false }
+          }
+        },
+        "llm": {
+          "properties": {
+            "model": { "type": "keyword" },
+            "tokens": {
+              "properties": {
+                "input": { "type": "long" },
+                "output": { "type": "long" },
+                "total": { "type": "long" },
+                "cache_read": { "type": "long" },
+                "cache_write": { "type": "long" }
+              }
+            }
+          }
+        },
+        "event": {
+          "properties": {
+            "outcome": { "type": "keyword" },
+            "duration": { "type": "long" }
+          }
+        },
+        "error": {
+          "properties": {
+            "message": { "type": "match_only_text" }
+          }
+        }
+      }
+    }
+  }
+}

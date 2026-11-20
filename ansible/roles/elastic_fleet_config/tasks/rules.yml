@@ -1,0 +1,107 @@
+---
+# Install/update prebuilt detection rules and enable a selection.
+
+- name: Read status of the prebuilt rules
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/detection_engine/rules/prepackaged/_status"
+    headers: "{{ kbn_headers_versioned }}"
+  register: _rules_status
+  changed_when: false
+
+- name: Query package security_detection_engine
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/fleet/epm/packages/security_detection_engine"
+    headers: "{{ kbn_headers_versioned }}"
+    status_code: [200, 404]
+  register: _sde_pkg
+  changed_when: false
+
+- name: Install/update prebuilt rules + timelines (takes several minutes)
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/detection_engine/rules/prepackaged"
+    method: PUT
+    headers: "{{ kbn_headers_versioned }}"
+    timeout: 900
+  register: _rules_install
+  when: >-
+    (rules_always_refresh | bool) or
+    _sde_pkg.status != 200 or
+    (_sde_pkg.json.item.status | default('')) != 'installed' or
+    (_rules_status.json.rules_not_installed | default(0) | int) > 0 or
+    (_rules_status.json.rules_not_updated | default(0) | int) > 0
+  changed_when: >-
+    (_rules_install.json.rules_installed | default(0) | int) > 0 or
+    (_rules_install.json.rules_updated | default(0) | int) > 0
+
+- name: Installation result
+  ansible.builtin.debug:
+    msg: >-
+      installed={{ _rules_install.json.rules_installed | default(0) }},
+      updated={{ _rules_install.json.rules_updated | default(0) }},
+      timelines installed={{ _rules_install.json.timelines_installed | default(0) }}
+  when: _rules_install is not skipped
+
+- name: Build KQL filter for rules to enable
+  ansible.builtin.set_fact:
+    rules_enable_query: >-
+      {%- if rules_enable_query_override | length > 0 -%}
+      {{ rules_enable_query_override }}
+      {%- else -%}
+      {%- set parts = ['alert.attributes.params.immutable:true'] -%}
+      {%- for group in [rules_enable_os_tags, rules_enable_tactic_tags, rules_enable_data_source_tags] if group | length > 0 -%}
+      {%-   set quoted = [] -%}
+      {%-   for t in group -%}{%- set _ = quoted.append('"' ~ t ~ '"') -%}{%- endfor -%}
+      {%-   set _ = parts.append('alert.attributes.tags:(' ~ (quoted | join(' OR ')) ~ ')') -%}
+      {%- endfor -%}
+      {%- if rules_exclude_ml | bool -%}
+      {%-   set _ = parts.append('NOT alert.attributes.params.type:machine_learning') -%}
+      {%- endif -%}
+      {{ parts | join(' AND ') }}
+      {%- endif -%}
+
+- name: Show KQL filter
+  ansible.builtin.debug:
+    var: rules_enable_query
+
+- name: Count still disabled rules of the selection
+  ansible.builtin.uri:
+    url: >-
+      {{ kibana_url }}/api/detection_engine/rules/_find?per_page=1&filter={{
+      ('(' ~ rules_enable_query ~ ') AND alert.attributes.enabled:false') | urlencode }}
+    headers: "{{ kbn_headers_versioned }}"
+  register: _rules_disabled
+  changed_when: false
+
+- name: Enable rules via bulk action
+  ansible.builtin.uri:
+    url: "{{ kibana_url }}/api/detection_engine/rules/_bulk_action"
+    method: POST
+    headers: "{{ kbn_headers_versioned }}"
+    body_format: json
+    body:
+      action: enable
+      query: "{{ rules_enable_query }}"
+    # 500 = partial success (e.g. rules that cannot be enabled due to the license), details in the body
+    status_code: [200, 500]
+    timeout: 900
+  register: _rules_enable
+  when: (_rules_disabled.json.total | default(0) | int) > 0
+  changed_when: (_rules_enable.json.attributes.summary.succeeded | default(0) | int) > 0
+
+- name: Activation result
+  ansible.builtin.debug:
+    msg: >-
+      to_enable={{ _rules_disabled.json.total | default(0) }},
+      succeeded={{ _rules_enable.json.attributes.summary.succeeded | default(0) }},
+      failed={{ _rules_enable.json.attributes.summary.failed | default(0) }},
+      skipped={{ _rules_enable.json.attributes.summary.skipped | default(0) }}
+      {{ ('| errors: ' ~ (_rules_enable.json.attributes.errors | default([]) | map(attribute='message') | list | unique | join('; ')))
+         if (_rules_enable.json.attributes.errors | default([]) | length) > 0 else '' }}
+  when: _rules_enable is not skipped
+
+- name: Abort bulk action without success
+  ansible.builtin.fail:
+    msg: "No rule enabled: {{ _rules_enable.json | default({}) | to_json }}"
+  when:
+    - _rules_enable is not skipped
+    - (_rules_enable.json.attributes.summary.succeeded | default(0) | int) == 0

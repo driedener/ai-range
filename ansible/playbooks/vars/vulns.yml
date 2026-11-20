@@ -1,0 +1,51 @@
+---
+# Shared values for the vulnerability profiles (playbooks/vulns.yml, roles/vuln_*).
+#
+# The passwords here are DELIBERATELY weak or well known: they are in rockyou (with the default rules
+# of john/hashcat) or are typical spray candidates. They are part of the exercise and not secrets –
+# real credentials (Domain Admin, RANGE_USER_PASSWORD …) still come only from docker/.env.
+# They must satisfy the domain password policy (complexity, min. 7 characters).
+
+vuln_all_profiles:
+  - vuln_data
+  - vuln_weak_passwords
+  - vuln_asrep
+  - vuln_kerberoast
+  - vuln_acl
+  - vuln_dcsync
+  - vuln_delegation
+  - vuln_adcs
+  - vuln_gpp
+  - vuln_smb
+  - vuln_local_admin
+  - vuln_llmnr
+  - vuln_linux
+  - vuln_webapp
+
+# --- Accounts -----------------------------------------------------------------
+# Password spraying: seasonal or default welcome password
+vuln_spray_users:
+  - { sam: markus.wolf, password: "Herbst2026!" }
+  - { sam: lisa.lange, password: "Willkommen1" }
+# Password in the description field (readable by every domain user via LDAP)
+vuln_description_user: { sam: tobias.krueger, password: "Start123!", description: "New employee - initial password Start123! (please change)" }
+# AS-REP roasting: Kerberos preauth disabled, password from rockyou
+vuln_asrep_users:
+  - { sam: patrick.kaiser, password: "Sunshine1" }
+# LLMNR/NBT-NS: victim whose scheduled task accesses a non-existent server
+vuln_llmnr_user: { sam: claudia.weber, password: "Butterfly1" }
+vuln_llmnr_bogus_host: fileserv          # typo name that DNS does not resolve
+
+# Service accounts (from ad_objects). svc.sql/svc.backup crackable, svc.web not (it is in web.config instead).
+vuln_svc_passwords:
+  svc.sql: "Password1"
+  svc.backup: "Football1"
+  svc.web: "W3b-Intranet#2026"
+
+# Local support admin on all clients (same password everywhere; also in GPP and in the scripts share)
+vuln_local_admin_user: itsupport
+vuln_local_admin_password: "Helpdesk2024!"
+
+# Linux: entry account on the Linux web server (scenario linux-path)
+vuln_linux_user: deploy
+vuln_linux_password: "Deploy-2026!"

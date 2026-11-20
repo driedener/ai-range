@@ -1,0 +1,183 @@
+---
+# =============================================================================
+# Connection (names identical to inventory/group_vars/all.yml)
+# =============================================================================
+kibana_url: https://kibana:5601
+elastic_es_url: https://es01:9200
+range_ca_cert: /certs/ca/ca.crt
+elastic_user: elastic
+elastic_password: "{{ lookup('env', 'ELASTIC_PASSWORD') }}"
+
+# Headers for Kibana APIs. Versioned public routes (Fleet, Detection
+# Engine) additionally get elastic-api-version.
+kibana_api_version: "2023-10-31"
+
+# Waiting for Kibana (seconds = retries * delay)
+kibana_wait_retries: 60
+kibana_wait_delay: 10
+
+# =============================================================================
+# Elastic Defend
+# =============================================================================
+# With AIRANGE_EDR=sentinelone, S1 handles detection/response -> Defend + prebuilt rules off
+range_edr: "{{ lookup('env', 'AIRANGE_EDR') | default('elastic', true) | lower }}"
+defend_enabled: "{{ range_edr != 'sentinelone' }}"
+# detect | prevent  (applies to malware, ransomware, memory_protection,
+# behavior_protection – only where the license supports the protection)
+defend_mode: detect
+# Preset on creation: DataCollection | NGAV | EDREssential | EDRComplete
+defend_preset: EDRComplete
+# Operating systems whose protection modes are set
+defend_policy_os:
+  - windows
+  - linux
+defend_protections:
+  - malware
+  - ransomware
+  - memory_protection
+  - behavior_protection
+# Agent policies (preconfigured in docker/elastic/kibana.yml), one
+# Defend package policy each, named "defend-<agent_policy_id>"
+defend_agent_policies:
+  - range-windows
+  - range-linux
+# Namespace of the Defend data (like the agent policies in kibana.yml)
+defend_namespace: range
+
+# =============================================================================
+# Extra integrations (via API, see tasks/integrations.yml)
+# =============================================================================
+fleet_extra_integrations:
+  # IIS access/error logs (web01, ca01); on hosts without IIS only the paths
+  # are missing. Metrics off – Perfmon counters only exist with IIS installed.
+  - name: iis-windows
+    package: iis
+    agent_policies: [range-windows]
+    inputs:
+      iis-logfile: { enabled: true }
+      iis-iis/metrics: { enabled: false }
+
+# =============================================================================
+# Prebuilt Detection Rules
+# =============================================================================
+rules_enabled: "{{ range_edr != 'sentinelone' }}"
+# true = always install/update the prebuilt rule package (PUT prepackaged),
+# false = only if _status reports missing/outdated rules or the package is missing
+rules_always_refresh: false
+# Enable rules that carry at least one of these OS tags ...
+rules_enable_os_tags:
+  - "OS: Windows"
+  - "OS: Linux"
+# ... AND at least one of these tactic tags (KQL has no wildcards
+# in quoted phrases, hence an explicit list instead of "Tactic: *").
+rules_enable_tactic_tags:
+  - "Tactic: Reconnaissance"
+  - "Tactic: Resource Development"
+  - "Tactic: Initial Access"
+  - "Tactic: Execution"
+  - "Tactic: Persistence"
+  - "Tactic: Privilege Escalation"
+  - "Tactic: Defense Evasion"
+  - "Tactic: Credential Access"
+  - "Tactic: Discovery"
+  - "Tactic: Lateral Movement"
+  - "Tactic: Collection"
+  - "Tactic: Command and Control"
+  - "Tactic: Exfiltration"
+  - "Tactic: Impact"
+# Optionally also restrict to data sources (empty = no filter), e.g.
+#   ["Data Source: Elastic Defend", "Data Source: Elastic Endgame",
+#    "Data Source: Windows Security Event Logs", "Data Source: PowerShell Logs",
+#    "Data Source: Sysmon", "Data Source: System", "Data Source: Auditd Manager"]
+rules_enable_data_source_tags: []
+# Skip ML rules (need Platinum/Trial + ML jobs)
+rules_exclude_ml: true
+# Fully custom KQL query (overrides the tag filters above), e.g.
+#   'alert.attributes.tags:"OS: Windows" AND alert.attributes.params.type:eql'
+rules_enable_query_override: ""
+
+# =============================================================================
+# Range indices (ground truth / agent traces) – deliberately OUTSIDE of logs-*
+# =============================================================================
+range_groundtruth_stream: range-groundtruth
+range_agenttrace_stream: range-agenttrace
+# Increment on changes to mappings/settings -> template is rewritten
+range_template_version: 1
+range_index_replicas: 0
+
+# =============================================================================
+# ILM
+# =============================================================================
+range_ilm_policy: range-14d
+range_retention_days: 14
+range_rollover_max_age: 1d
+range_rollover_max_primary_shard_size: 10gb
+range_ilm_version: 1
+
+# Retention for all logs-* data streams (Fleet/integrations) via the
+# component template "logs@custom". 0 = leave untouched.
+logs_retention_days: 14
+logs_ilm_policy: range-logs-retention
+
+# =============================================================================
+# Roles & users
+# =============================================================================
+range_users:
+  - username: blue-agent
+    role: range_blue
+    full_name: Blue Agent (SOC)
+    password_env: RANGE_BLUE_PASSWORD
+  - username: red-agent
+    role: range_red
+    full_name: Red Agent (Attacker)
+    password_env: RANGE_RED_PASSWORD
+  - username: orchestrator
+    role: range_orchestrator
+    full_name: Range Orchestrator
+    password_env: RANGE_ORCH_PASSWORD
+
+# Additional Kibana feature privileges per role (feature ID -> [privs]),
+# merged into the automatically determined features.
+range_blue_extra_kibana_features: {}
+
+# Sub-features of the main Security feature (siem*) for range_blue. They are
+# NOT part of "all" (includeIn: none) and must be granted explicitly; the
+# role then gets "minimal_all" + this list. Empty = simply "all".
+# Response actions of the blue agent: isolate/release, kill/suspend/process list.
+range_blue_siem_subfeatures:
+  - endpoint_list_read
+  - actions_log_management_read
+  - host_isolation_all
+  - process_operations_all
+range_red_extra_kibana_features: {}
+range_orchestrator_extra_kibana_features: {}
+
+# ES index privileges of the roles. range_blue deliberately gets NO pattern
+# that matches range-groundtruth* (ES has no negation for index privileges).
+range_blue_indices:
+  - names: ["logs-*", "metrics-*"]
+    privileges: [read, view_index_metadata]
+  # Triaging alerts (set status, assign) needs write on the alert indices
+  - names: [".alerts-security*", ".internal.alerts-security*", ".siem-signals*"]
+    privileges: [read, write, view_index_metadata, maintenance]
+  # Rule preview (engineer) writes preview alerts into separate indices
+  - names: [".preview.alerts-security*", ".internal.preview.alerts-security*"]
+    privileges: [read, write, view_index_metadata, maintenance]
+  # Exceptions / Value Lists
+  - names: [".lists*", ".items*"]
+    privileges: [read, write, view_index_metadata]
+  # Only append own traces, not read them (red traces stay invisible)
+  - names: ["{{ range_agenttrace_stream }}*"]
+    privileges: [create_doc, auto_configure]
+
+range_red_indices:
+  - names: ["{{ range_groundtruth_stream }}*", "{{ range_agenttrace_stream }}*"]
+    privileges: [create_doc, auto_configure]
+
+range_orchestrator_indices:
+  - names: ["range-*"]
+    privileges: [read, write, create_index, auto_configure, view_index_metadata]
+  - names: ["logs-*", "metrics-*"]
+    privileges: [read, view_index_metadata]
+  - names: [".alerts-security*", ".internal.alerts-security*", ".siem-signals*"]
+    privileges: [read, view_index_metadata]

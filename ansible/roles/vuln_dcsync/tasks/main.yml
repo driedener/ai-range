@@ -1,0 +1,27 @@
+---
+# Runs on the DC. DCSync (T1003.006): replication rights on the domain object for a non-admin account
+# ("the backup software needs it"). Reachable via vuln_acl, vuln_local_admin (LSA secret) or vuln_smb.
+- name: Replication rights
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Sam: "{{ vuln_dcsync_account }}"
+    script: |
+      param([string]$Sam)
+      Import-Module ActiveDirectory
+      $dn = (Get-ADDomain).DistinguishedName
+      $sid = (Get-ADUser $Sam).SID
+      $acl = Get-Acl "AD:$dn"
+      $Ansible.Changed = $false
+      function Sid($r) { try { $r.Translate([Security.Principal.SecurityIdentifier]) } catch { $null } }
+      # DS-Replication-Get-Changes, DS-Replication-Get-Changes-All
+      foreach ($g in '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2') {
+        $has = $acl.Access | Where-Object { $_.ObjectType -eq [guid]$g -and
+          (Sid $_.IdentityReference) -eq $sid }
+        if (-not $has) {
+          $acl.AddAccessRule((New-Object System.DirectoryServices.ActiveDirectoryAccessRule(
+            $sid, 'ExtendedRight', 'Allow', [guid]$g)))
+          $Ansible.Changed = $true
+        }
+      }
+      if ($Ansible.Changed) { Set-Acl -Path "AD:$dn" -AclObject $acl }

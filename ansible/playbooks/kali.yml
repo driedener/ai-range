@@ -1,0 +1,8 @@
+---
+# Attacker VM: check/install tools, NO Elastic Agent
+- name: Kali
+  hosts: attacker
+  gather_facts: false
+  become: true
+  roles:
+    - kali

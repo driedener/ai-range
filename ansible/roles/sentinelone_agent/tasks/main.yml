@@ -1,0 +1,70 @@
+---
+# SentinelOne agent on Windows hosts and Linux servers (alternative to the Elastic Agent).
+# Installers come from the controller (tools container), the site token from the env or via API.
+
+- name: Find installers on the controller
+  ansible.builtin.set_fact:
+    sentinelone_installer_windows: >-
+      {{ query('ansible.builtin.fileglob', sentinelone_installer_dir ~ '/' ~ sentinelone_installer_windows_glob)
+         | sort | last | default('') }}
+    sentinelone_installer_linux: >-
+      {{ query('ansible.builtin.fileglob', sentinelone_installer_dir ~ '/' ~ sentinelone_installer_linux_glob)
+         | sort | last | default('') }}
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Installer present
+  ansible.builtin.assert:
+    that: >-
+      (sentinelone_installer_windows | length > 0 if 'windows' in group_names
+       else sentinelone_installer_linux | length > 0)
+    fail_msg: >-
+      No SentinelOne installer for {{ inventory_hostname }} under {{ sentinelone_installer_dir }}
+      ({{ sentinelone_installer_windows_glob }} / {{ sentinelone_installer_linux_glob }}).
+    quiet: true
+
+- name: Fetch site token via API
+  when: sentinelone_site_token | length == 0
+  delegate_to: localhost
+  run_once: true
+  become: false
+  block:
+    - name: Prerequisites for the API call
+      ansible.builtin.assert:
+        that:
+          - sentinelone_console_url | length > 0
+          - sentinelone_api_token | length > 0
+          - sentinelone_site_id | length > 0
+        fail_msg: Set S1_SITE_TOKEN or (S1_CONSOLE_URL, S1_API_TOKEN, S1_SITE_ID) in the tools container.
+        quiet: true
+
+    - name: Read site from the SentinelOne API
+      ansible.builtin.uri:
+        url: "{{ sentinelone_console_url }}/web/api/v2.1/sites?siteIds={{ sentinelone_site_id }}"
+        headers:
+          Authorization: "ApiToken {{ sentinelone_api_token }}"
+        return_content: true
+        status_code: 200
+      register: sentinelone_sites
+      no_log: true
+
+    - name: Take over registration token
+      ansible.builtin.set_fact:
+        sentinelone_site_token: >-
+          {{ (sentinelone_sites.json.data.sites | first).registrationToken | default('') }}
+      no_log: true
+
+- name: Site token present
+  ansible.builtin.assert:
+    that: sentinelone_site_token | length > 0
+    fail_msg: No site token (S1_SITE_TOKEN empty and the API returned no registrationToken).
+    quiet: true
+
+- name: SentinelOne (Windows)
+  ansible.builtin.include_tasks: windows.yml
+  when: "'windows' in group_names"
+
+- name: SentinelOne (Linux)
+  ansible.builtin.include_tasks: linux.yml
+  when: "'linux' in group_names"

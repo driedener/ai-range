@@ -1,0 +1,80 @@
+{
+  "index_patterns": ["{{ range_groundtruth_stream }}*"],
+  "data_stream": {},
+  "priority": 500,
+  "version": {{ range_template_version | int }},
+  "_meta": {
+    "managed_by": "ai-range ansible elastic_fleet_config",
+    "description": "Ground truth of the red agent (executed techniques). Deliberately outside of logs-* so range_blue has no access."
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "{{ range_ilm_policy }}",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": {{ range_index_replicas | int }}
+    },
+    "mappings": {
+      "dynamic": true,
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "message": { "type": "match_only_text" },
+        "run": {
+          "properties": {
+            "id": { "type": "keyword" }
+          }
+        },
+        "agent": {
+          "properties": {
+            "name": { "type": "keyword" }
+          }
+        },
+        "source": {
+          "properties": {
+            "ip": { "type": "ip" }
+          }
+        },
+        "destination": {
+          "properties": {
+            "ip": { "type": "ip" }
+          }
+        },
+        "host": {
+          "properties": {
+            "name": { "type": "keyword" }
+          }
+        },
+        "threat": {
+          "properties": {
+            "technique": {
+              "properties": {
+                "id": { "type": "keyword" },
+                "name": {
+                  "type": "keyword",
+                  "fields": { "text": { "type": "match_only_text" } }
+                }
+              }
+            },
+            "tactic": {
+              "properties": {
+                "name": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "process": {
+          "properties": {
+            "command_line": {
+              "type": "wildcard",
+              "fields": { "text": { "type": "match_only_text" } }
+            }
+          }
+        },
+        "event": {
+          "properties": {
+            "outcome": { "type": "keyword" }
+          }
+        }
+      }
+    }
+  }
+}

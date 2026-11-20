@@ -1,0 +1,40 @@
+---
+# Shared variables for all range hosts.
+# Secrets come exclusively from env variables of the tools container (docker/.env).
+
+# Topology (range_domain, range_netbios, range_domain_dn, range_dc_name/_ip/_fqdn, range_gateway, range_cidr,
+# range_reverse_zone, range_dns_forwarders, range_attacker_ip, range_controller_ip …) is defined as all.vars in the
+# generated inventory (scripts/configure.py from range.yaml) – do not override it here.
+
+# --- Active Directory --------------------------------------------------------
+# Departments -> AD groups GG_<Name>, folders on the file server's Data share
+range_departments:
+  - IT
+  - Finance
+  - HR
+  - Sales
+  - Marketing
+  - Engineering
+  - Management
+
+# Time zones (range_timezone_linux, range_timezone_windows) come from range.yaml (locale.*) via the inventory.
+
+# --- Credentials (from env) -------------------------------------------------
+range_admin_password: "{{ lookup('env', 'RANGE_ADMIN_PASSWORD') }}"
+range_dsrm_password: "{{ lookup('env', 'RANGE_DSRM_PASSWORD') }}"
+range_user_password: "{{ lookup('env', 'RANGE_USER_PASSWORD') }}"
+range_tier0_password: "{{ lookup('env', 'RANGE_TIER0_PASSWORD') }}"
+
+# --- EDR on the range hosts: elastic | sentinelone ---------------------------
+# Ground truth/traces/scores stay in the Elastic stack on the controller in both cases.
+range_edr: "{{ lookup('env', 'AIRANGE_EDR') | default('elastic', true) | lower }}"
+
+# --- Elastic -----------------------------------------------------------------
+# Controller IP: range_controller_ip (from range.yaml)
+fleet_url: "https://{{ range_controller_ip }}:8220"
+elastic_version: "{{ lookup('env', 'ELASTIC_VERSION') }}"
+elastic_password: "{{ lookup('env', 'ELASTIC_PASSWORD') }}"
+# Kibana as seen from the tools container (Compose network)
+kibana_url: https://kibana:5601
+# Elastic CA on the controller (tools container)
+range_ca_cert: /certs/ca/ca.crt

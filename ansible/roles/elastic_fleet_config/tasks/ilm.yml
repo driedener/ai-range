@@ -1,0 +1,88 @@
+---
+# --- ILM policy for the range-* data streams --------------------------------
+- name: "Read ILM policy {{ range_ilm_policy }}"
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_ilm/policy/{{ range_ilm_policy }}"
+    status_code: [200, 404]
+  register: _range_ilm
+  changed_when: false
+
+- name: "Write ILM policy {{ range_ilm_policy }}"
+  ansible.builtin.uri:
+    url: "{{ elastic_es_url }}/_ilm/policy/{{ range_ilm_policy }}"
+    method: PUT
+    body_format: json
+    body: "{{ lookup('ansible.builtin.template', 'ilm_policy.json.j2') }}"
+  vars:
+    ilm_version: "{{ range_ilm_version }}"
+    ilm_retention_days: "{{ range_retention_days }}"
+    ilm_rollover_max_age: "{{ range_rollover_max_age }}"
+  when: >-
+    _range_ilm.status == 404 or
+    (_range_ilm.json[range_ilm_policy].policy._meta.version | default(-1) | int)
+      != (range_ilm_version | int) or
+    (_range_ilm.json[range_ilm_policy].policy._meta.retention_days | default(-1) | int)
+      != (range_retention_days | int)
+  changed_when: true
+
+# --- Optional retention for all logs-* (Fleet/integrations) ----------------
+# The managed policy "logs" is NOT modified. Instead the component template
+# "logs@custom" (included in all logs-* index templates after the
+# @package template) sets index.lifecycle.name to a custom policy.
+# Applies to new backing indices (after the next rollover).
+- name: Configure retention for logs-*
+  when: (logs_retention_days | int) > 0
+  block:
+    - name: "Read ILM policy {{ logs_ilm_policy }}"
+      ansible.builtin.uri:
+        url: "{{ elastic_es_url }}/_ilm/policy/{{ logs_ilm_policy }}"
+        status_code: [200, 404]
+      register: _logs_ilm
+      changed_when: false
+
+    - name: "Write ILM policy {{ logs_ilm_policy }} ({{ logs_retention_days }} days)"
+      ansible.builtin.uri:
+        url: "{{ elastic_es_url }}/_ilm/policy/{{ logs_ilm_policy }}"
+        method: PUT
+        body_format: json
+        body: "{{ lookup('ansible.builtin.template', 'ilm_policy.json.j2') }}"
+      vars:
+        ilm_version: "{{ range_ilm_version }}"
+        ilm_retention_days: "{{ logs_retention_days }}"
+        ilm_rollover_max_age: "{{ range_rollover_max_age }}"
+      when: >-
+        _logs_ilm.status == 404 or
+        (_logs_ilm.json[logs_ilm_policy].policy._meta.version | default(-1) | int)
+          != (range_ilm_version | int) or
+        (_logs_ilm.json[logs_ilm_policy].policy._meta.retention_days | default(-1) | int)
+          != (logs_retention_days | int)
+      changed_when: true
+
+    - name: Read component template logs@custom
+      ansible.builtin.uri:
+        url: "{{ elastic_es_url }}/_component_template/logs@custom"
+        status_code: [200, 404]
+      register: _logs_custom
+      changed_when: false
+
+    - name: Determine existing logs@custom
+      ansible.builtin.set_fact:
+        _logs_custom_ct: >-
+          {{ (_logs_custom.json.component_templates[0].component_template
+              if _logs_custom.status == 200 else {'template': {}}) }}
+
+    - name: Set component template logs@custom (keep existing content)
+      ansible.builtin.uri:
+        url: "{{ elastic_es_url }}/_component_template/logs@custom"
+        method: PUT
+        body_format: json
+        body: >-
+          {{ _logs_custom_ct | combine({
+               'template': {'settings': {'index': {'lifecycle': {'name': logs_ilm_policy}}}},
+               '_meta': {'managed_by': 'ai-range ansible elastic_fleet_config'}
+             }, recursive=True) }}
+      when: >-
+        (_logs_custom_ct.template.settings.index.lifecycle.name
+          | default(_logs_custom_ct.template.settings['index.lifecycle.name'] | default('')))
+          != logs_ilm_policy
+      changed_when: true

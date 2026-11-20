@@ -1,0 +1,19 @@
+---
+- name: Update package sources
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ linux_base_packages }}"
+    state: present
+
+- name: Remove package auditd (conflicts with Elastic auditd_manager)
+  ansible.builtin.apt:
+    name: "{{ linux_base_absent_packages }}"
+    state: absent
+
+- name: Set time zone
+  community.general.timezone:
+    name: "{{ linux_base_timezone }}"

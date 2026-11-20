@@ -1,0 +1,32 @@
+---
+# Runs on the CA host. Publish templates on the CA (writes the Enrollment Services entry in the
+# configuration partition -> Enterprise Admin, hence runas domain administrator) and Web Enrollment (ESC8).
+- name: Publish templates
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Names: "{{ vuln_adcs_templates | map(attribute='name') | list }}"
+    script: |
+      param([string[]]$Names)
+      Import-Module ADCSAdministration
+      $Ansible.Changed = $false
+      $have = @(Get-CATemplate | ForEach-Object Name)
+      foreach ($n in $Names) {
+        if ($have -contains $n) { continue }
+        # The CA reads templates from AD; freshly created ones may not be in its cache yet
+        for ($i = 0; $i -lt 10; $i++) {
+          try { Add-CATemplate -Name $n -Force -ErrorAction Stop; $Ansible.Changed = $true; break }
+          catch { if ($i -eq 9) { throw }; Start-Sleep -Seconds 15 }
+        }
+      }
+  become: true
+  become_method: ansible.builtin.runas
+  vars:
+    ansible_become_user: "{{ range_domain_admin_user }}"
+    ansible_become_password: "{{ range_domain_admin_password }}"
+
+- name: Web Enrollment (ESC8, NTLM over HTTP)
+  ansible.builtin.include_role:
+    name: adcs
+  vars:
+    adcs_web_enrollment: true

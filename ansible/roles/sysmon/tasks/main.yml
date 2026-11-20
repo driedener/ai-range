@@ -1,0 +1,69 @@
+---
+- name: Create Sysmon directory
+  ansible.windows.win_file:
+    path: "{{ sysmon_dir }}"
+    state: directory
+
+- name: Download Sysmon + config on the controller
+  delegate_to: localhost
+  run_once: true
+  block:
+    - name: Create cache directory
+      ansible.builtin.file:
+        path: "{{ sysmon_cache_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Sysmon.zip
+      ansible.builtin.get_url:
+        url: "{{ sysmon_zip_url }}"
+        dest: "{{ sysmon_cache_dir }}/Sysmon.zip"
+        mode: "0644"
+
+    - name: Download Sysmon config
+      ansible.builtin.get_url:
+        url: "{{ sysmon_config_url }}"
+        dest: "{{ sysmon_cache_dir }}/sysmonconfig.xml"
+        mode: "0644"
+        force: true
+
+- name: Copy Sysmon.zip
+  ansible.windows.win_copy:
+    src: "{{ sysmon_cache_dir }}/Sysmon.zip"
+    dest: "{{ sysmon_dir }}\\Sysmon.zip"
+
+- name: Unpack Sysmon
+  community.windows.win_unzip:
+    src: "{{ sysmon_dir }}\\Sysmon.zip"
+    dest: "{{ sysmon_dir }}"
+    creates: "{{ sysmon_dir }}\\Sysmon64.exe"
+
+# win_copy only reports changed when the content changed -> then reload the config
+- name: Copy Sysmon config
+  ansible.windows.win_copy:
+    src: "{{ sysmon_cache_dir }}/sysmonconfig.xml"
+    dest: "{{ sysmon_dir }}\\sysmonconfig.xml"
+  register: sysmon_config
+
+- name: Check Sysmon service
+  ansible.windows.win_service_info:
+    name: "{{ sysmon_service_name }}"
+  register: sysmon_service
+
+- name: Install Sysmon
+  ansible.windows.win_command: >-
+    "{{ sysmon_dir }}\Sysmon64.exe" -accepteula -i "{{ sysmon_dir }}\sysmonconfig.xml"
+  when: not sysmon_service.exists
+
+- name: Update Sysmon config
+  ansible.windows.win_command: >-
+    "{{ sysmon_dir }}\Sysmon64.exe" -c "{{ sysmon_dir }}\sysmonconfig.xml"
+  when:
+    - sysmon_service.exists
+    - sysmon_config is changed
+
+- name: Sysmon service is running
+  ansible.windows.win_service:
+    name: "{{ sysmon_service_name }}"
+    state: started
+    start_mode: auto

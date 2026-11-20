@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces cloudbase-init's conf\Unattend.xml. Used by sysprep.ps1 via
+     sysprep /unattend:... and deleted from disk afterwards
+     (Windows caches the file in C:\Windows\Panther and redacts passwords). -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <settings pass="generalize">
+    <component name="Microsoft-Windows-PnpSysprep" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <PersistAllDeviceInstalls>true</PersistAllDeviceInstalls>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <!-- "*" = random name. Without ComputerName, Windows 11 (24H2+) shows the "Name your device"
+           page in OOBE and setup hangs (OOBEInProgress=1, runs again on every boot).
+           The final name is set by cloudbase-init (set-hostname-network.ps1) from Proxmox. -->
+      <ComputerName>*</ComputerName>
+      <TimeZone>${timezone}</TimeZone>
+    </component>
+    <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>net user Administrator /active:yes</Path>
+        </RunSynchronousCommand>
+        <!-- cloudbase-init unattend phase: hostname, MTU, volumes (ConfigDrive) -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>cmd.exe /c ""C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init-unattend.conf" &amp;&amp; exit 1 || exit 2"</Path>
+          <Description>Run cloudbase-init (unattend)</Description>
+          <WillReboot>OnRequest</WillReboot>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>${input_locale}</InputLocale>
+      <SystemLocale>${ui_language}</SystemLocale>
+      <UILanguage>${ui_language}</UILanguage>
+      <UserLocale>${ui_language}</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>${admin_password}</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+%{ if is_client ~}
+        <!-- Windows 11 (24H2+) requires a local account in OOBE ("Who's going to use this device?")
+             and ignores HideLocalAccountScreen as long as none is created. -->
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>range</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>${admin_password}</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+%{ endif ~}
+      </UserAccounts>
+      <TimeZone>${timezone}</TimeZone>
+    </component>
+  </settings>
+</unattend>

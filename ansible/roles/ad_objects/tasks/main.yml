@@ -1,0 +1,138 @@
+---
+# Runs on DC01 as RANGE\Administrator (Domain Admin).
+- name: Check inputs
+  ansible.builtin.assert:
+    that:
+      - range_user_password | length > 0
+      - range_tier0_password | length > 0
+      - range_tier0_password != range_user_password
+      - (ad_objects_users + ad_objects_admins + ad_objects_service_accounts) | map(attribute='sam') | map('length') | max <= 20
+    fail_msg: RANGE_USER_PASSWORD/RANGE_TIER0_PASSWORD is missing, both are identical, or a sAMAccountName is longer than 20 characters.
+    quiet: true
+
+- name: Create OUs
+  microsoft.ad.ou:
+    name: "{{ item.name }}"
+    path: "{{ range_domain_dn }}"
+    description: "{{ item.description }}"
+    state: present
+  loop: "{{ ad_objects_ous }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create department groups
+  microsoft.ad.group:
+    name: "{{ ad_objects_group_prefix }}{{ item }}"
+    scope: global
+    category: security
+    path: "OU=Groups,{{ range_domain_dn }}"
+    description: "Department {{ item }}"
+    state: present
+  loop: "{{ range_departments }}"
+
+- name: Create employees
+  microsoft.ad.user:
+    identity: "{{ item.sam }}"
+    name: "{{ item.first }} {{ item.last }}"
+    sam_account_name: "{{ item.sam }}"
+    upn: "{{ item.sam }}@{{ range_domain }}"
+    firstname: "{{ item.first }}"
+    surname: "{{ item.last }}"
+    display_name: "{{ item.first }} {{ item.last }}"
+    email: "{{ item.sam }}@{{ range_domain }}"
+    company: "{{ ad_objects_company }}"
+    path: "OU=Staff,{{ range_domain_dn }}"
+    password: "{{ range_user_password }}"
+    update_password: on_create
+    enabled: true
+    attributes:
+      set:
+        department: "{{ item.department }}"
+        title: "{{ item.title }}"
+    groups:
+      add:
+        - "{{ ad_objects_group_prefix }}{{ item.department }}"
+    state: present
+  loop: "{{ ad_objects_users }}"
+  loop_control:
+    label: "{{ item.sam }}"
+
+- name: Create admin accounts (Domain Admins)
+  microsoft.ad.user:
+    identity: "{{ item.sam }}"
+    name: "{{ item.sam }}"
+    sam_account_name: "{{ item.sam }}"
+    upn: "{{ item.sam }}@{{ range_domain }}"
+    firstname: "{{ item.first }}"
+    surname: "{{ item.last }}"
+    display_name: "{{ item.first }} {{ item.last }} (Admin)"
+    description: "Tier 0 admin account of {{ item.first }} {{ item.last }}"
+    path: "OU=Tier0,{{ range_domain_dn }}"
+    # own password (RANGE_TIER0_PASSWORD), not the shared user password
+    password: "{{ range_tier0_password }}"
+    update_password: when_changed
+    enabled: true
+    groups:
+      add:
+        - Domain Admins
+    state: present
+  loop: "{{ ad_objects_admins }}"
+  loop_control:
+    label: "{{ item.sam }}"
+
+- name: Create service accounts
+  microsoft.ad.user:
+    identity: "{{ item.sam }}"
+    name: "{{ item.sam }}"
+    sam_account_name: "{{ item.sam }}"
+    upn: "{{ item.sam }}@{{ range_domain }}"
+    description: "{{ item.description }}"
+    path: "OU=ServiceAccounts,{{ range_domain_dn }}"
+    password: "{{ range_user_password }}"
+    update_password: on_create
+    enabled: true
+    state: present
+  loop: "{{ ad_objects_service_accounts }}"
+  loop_control:
+    label: "{{ item.sam }}"
+
+- name: Read-only account for the SentinelOne Identity connector
+  microsoft.ad.user:
+    identity: "{{ ad_objects_s1_identity_user }}"
+    name: "{{ ad_objects_s1_identity_user }}"
+    sam_account_name: "{{ ad_objects_s1_identity_user }}"
+    upn: "{{ ad_objects_s1_identity_user }}@{{ range_domain }}"
+    description: SentinelOne Identity AD connector (read-only)
+    path: "OU=ServiceAccounts,{{ range_domain_dn }}"
+    password: "{{ ad_objects_s1_identity_password }}"
+    update_password: always
+    password_never_expires: true
+    enabled: true
+    state: present
+  when: ad_objects_s1_identity_password | length > 0
+  no_log: true
+  tags: [s1_identity]
+
+# AD connector requirements (S1 "AD Connector with Windows Agent: requirements"): Threat Detection and
+# Assessment pull event logs from the DCs via WinRM/RPC. Read/remote rights only, no admin group.
+- name: Read-only account in Event Log Readers / Remote Management Users
+  microsoft.ad.group:
+    identity: "{{ item }}"
+    members:
+      add: ["{{ ad_objects_s1_identity_user }}"]
+    state: present
+  loop: [Event Log Readers, Remote Management Users]
+  when: ad_objects_s1_identity_password | length > 0
+  tags: [s1_identity]
+
+# WinRM over HTTPS (5986) for the S1 AD connector: tasks/winrm_https.yml, runs from playbooks/ad.yml
+# only after the Enterprise CA (needs the DC certificate from autoenrollment).
+
+- name: Enable firewall rules Remote Event Log Management (RPC, RPC-EPMAP, NP-In)
+  ansible.windows.win_powershell:
+    script: |
+      $Ansible.Changed = $false
+      $r = Get-NetFirewallRule -DisplayGroup 'Remote Event Log Management' | Where-Object { $_.Enabled -ne 'True' }
+      if ($r) { $r | Enable-NetFirewallRule; $Ansible.Changed = $true }
+  when: ad_objects_s1_identity_password | length > 0
+  tags: [s1_identity]

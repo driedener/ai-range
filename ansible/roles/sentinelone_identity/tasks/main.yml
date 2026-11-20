@@ -1,0 +1,214 @@
+---
+# Idempotent: connector and AD configuration are only created if they are missing.
+# API quirks (determined live, not documented in the Swagger):
+#  - addCompleteAdConfiguration expects the password Base64-encoded (otherwise Kerberos 0x18 at the DC),
+#    allowedScopes as {scopeId, scopeLevel} (otherwise "Scope Input is null").
+
+- name: Check prerequisites
+  ansible.builtin.assert:
+    that:
+      - s1id_console_url | length > 0
+      - s1id_api_token | length > 0
+      - s1id_site_id | length > 0
+      - s1id_password | length >= 16
+    fail_msg: Set S1_CONSOLE_URL, S1_API_TOKEN, S1_SITE_ID and S1_AD_PASSWORD (>= 16 characters) in the tools container.
+    quiet: true
+
+- name: Common API parameters
+  ansible.builtin.set_fact:
+    s1id_api: "{{ s1id_console_url }}/web/api/v2.1"
+    s1id_headers:
+      Authorization: "ApiToken {{ s1id_api_token }}"
+    s1id_filter:
+      siteIds: ["{{ s1id_site_id }}"]
+
+- name: Find connector agent
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/agents?siteIds={{ s1id_site_id }}&computerName__contains={{ s1id_connector_host }}&isActive=true"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_agents
+
+- name: Determine connector agent
+  ansible.builtin.set_fact:
+    s1id_agent_uuid: >-
+      {{ (s1id_agents.json.data
+          | selectattr('computerName', 'equalto', s1id_connector_host)
+          | map(attribute='uuid') | list | first) | default('') }}
+
+- name: Connector agent present
+  ansible.builtin.assert:
+    that: s1id_agent_uuid | length > 0
+    fail_msg: "No active S1 agent {{ s1id_connector_host }} in site {{ s1id_site_id }} (playbooks/agents.yml with range_edr=sentinelone?)"
+    quiet: true
+
+- name: Read existing cloudlinks
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/adservice/api/getCloudlinkConfigurations?siteIds={{ s1id_site_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_cloudlinks
+
+- name: Register connector
+  when: >-
+    (s1id_cloudlinks.json.data or []) | selectattr('guid', 'equalto', s1id_agent_uuid) | list | length == 0
+  block:
+    - name: Enable websocket on the agent
+      ansible.builtin.uri:
+        url: "{{ s1id_api }}/identity/adservice/api/enableWebsocketOnAgent"
+        method: POST
+        headers: "{{ s1id_headers }}"
+        body_format: json
+        body: {filter: "{{ s1id_filter }}", input: {agentUuid: "{{ s1id_agent_uuid }}"}}
+
+    - name: Add agent as AD connector
+      ansible.builtin.uri:
+        url: "{{ s1id_api }}/identity/adservice/api/addAdConnector"
+        method: POST
+        headers: "{{ s1id_headers }}"
+        body_format: json
+        body: {filter: "{{ s1id_filter }}", input: {agentUuid: "{{ s1id_agent_uuid }}"}}
+        return_content: true
+      register: s1id_added
+      changed_when: true
+
+
+# Cloudlinks only appear in getCloudlinkConfigurations once an AD configuration exists –
+# so after addAdConnector take the ID from its response. Separate register name: a skipped task
+# with the same register would overwrite the variable.
+- name: Read the connector's cloudlink
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/adservice/api/getCloudlinkConfigurations?siteIds={{ s1id_site_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_cloudlinks_now
+
+- name: Determine cloudlink ID
+  ansible.builtin.set_fact:
+    s1id_cloudlink_id: >-
+      {{ ((s1id_cloudlinks_now.json.data or []) | selectattr('guid', 'equalto', s1id_agent_uuid)
+          | map(attribute='cloudlinkId') | list
+          + [((s1id_added | default({})).json | default({})).data.cloudlinkId | default(none)]) | select | first | default('') }}
+
+- name: Cloudlink ID present
+  ansible.builtin.assert:
+    that: (s1id_cloudlink_id | string | length) > 0
+    fail_msg: No cloudlink ID for the connector (getCloudlinkConfigurations empty, addAdConnector not run).
+    quiet: true
+
+- name: Read existing AD configurations
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/adservice/api/adConfigurations?siteIds={{ s1id_site_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_adconfigs
+
+- name: Existing AD configuration of the domain
+  ansible.builtin.set_fact:
+    s1id_existing: "{{ (s1id_adconfigs.json.data or []) | selectattr('domainName', 'equalto', s1id_domain) | first | default({}) }}"
+
+# Create if missing; update (update + adConfigId) if encryption, DC, user, WinRM SSL,
+# features or connector differ
+- name: Create or update AD configuration
+  when: >-
+    s1id_existing == {} or
+    s1id_existing.encryptionMethod != s1id_encryption or
+    s1id_existing.domainControllerFqdn != s1id_dc_fqdn or
+    s1id_existing.username != s1id_user or
+    (s1id_existing.useWinRmOverSsl | bool) != (s1id_use_winrm_ssl | bool) or
+    (s1id_existing.featuresOpted | sort) != (s1id_features | sort) or
+    (s1id_existing.cloudlinkId | int) != (s1id_cloudlink_id | int)
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/adservice/api/addCompleteAdConfiguration?siteIds={{ s1id_site_id }}"
+    method: POST
+    headers: "{{ s1id_headers }}"
+    body_format: json
+    # A single Jinja expression so int/bool keep their type in the JSON
+    body: >-
+      {{ {'filter': s1id_filter,
+          'input': {
+            'adConfigurationInput': dict({
+              'cloudlinkId': s1id_cloudlink_id | int,
+              'featuresOpted': s1id_features,
+              'allowedScopes': [{'scopeId': s1id_site_id, 'scopeLevel': 'SITE'}],
+              'isAllScopesAllowed': false,
+              'domainName': s1id_domain,
+              'assessOtherDomainsInForest': false,
+              'domainControllerFqdn': s1id_dc_fqdn,
+              'userName': s1id_user,
+              'password': s1id_password | b64encode,
+              'encryptionMethod': s1id_encryption,
+              'enableThreatDetection': s1id_enable_threat_detection | bool,
+              'ldapReferral': false,
+              'createdAt': {'scopeId': s1id_site_id, 'scopeLevel': 'SITE'},
+              'useWinRmOverSsl': s1id_use_winrm_ssl | bool,
+              'adSync': s1id_ad_sync | bool},
+              **({'update': true, 'adConfigId': s1id_existing.id | int} if s1id_existing else {'update': false})),
+            'adRefreshScheduleConfigurationInput': {
+              'ad_domain_name': s1id_domain, 'frequency': 'DAILY',
+              'hour': s1id_refresh_hour | int, 'minute': s1id_refresh_minute | int,
+              'time_zone': s1id_time_zone, 'weekday': 'MONDAY', 'day_of_month': 1}}} }}
+    return_content: true
+  changed_when: true
+  no_log: true
+
+- name: Status of the AD configuration
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/adservice/api/adConfigurations?siteIds={{ s1id_site_id }}"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_status
+
+- name: Show status
+  ansible.builtin.debug:
+    msg: "{{ item.featureType }}: {{ item.status }} {{ item.detailedMessage or '' }}"
+  loop: >-
+    {{ (s1id_status.json.data | selectattr('domainName', 'equalto', s1id_domain) | first).featureStatusInfo }}
+  loop_control:
+    label: "{{ item.featureType }}"
+
+# Identity policies (DC + clients). createPolicy/updatePolicy need undocumented engine configurations;
+# the policies are therefore created in the console (copy of the wizard defaults) and only activated here.
+# Exception: the Conditional Access policy (tasks/conditional_access.yml) can be created via API.
+- name: Conditional Access
+  when: s1id_ca_enabled | bool
+  ansible.builtin.include_tasks: conditional_access.yml
+
+- name: Read Identity policies
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/getPolicy?siteIds={{ s1id_site_id }}&limit=50"
+    headers: "{{ s1id_headers }}"
+    return_content: true
+  register: s1id_policies
+
+- name: Identity policies present
+  ansible.builtin.assert:
+    that: >-
+      (s1id_policies.json.data | default([]) | selectattr('name', 'in', s1id_policy_names) | list | length)
+      == (s1id_policy_names | length)
+    fail_msg: "Policies {{ s1id_policy_names }} are missing in the site – create them in the S1 console (see docs/sentinelone.md)."
+    quiet: true
+
+- name: Activate Identity policies
+  vars:
+    s1id_inactive: >-
+      {{ s1id_policies.json.data | selectattr('name', 'in', s1id_policy_names)
+         | rejectattr('policyStatus', 'equalto', 'ACTIVE') | map(attribute='id') | list }}
+  when: s1id_inactive | length > 0
+  ansible.builtin.uri:
+    url: "{{ s1id_api }}/identity/identity-policy-service/api/activatingPolicy"
+    method: POST
+    headers: "{{ s1id_headers }}"
+    body_format: json
+    body: "{{ {'filter': s1id_filter, 'input': {'policyIds': s1id_inactive, 'loggedInUser': 'ai-range', 'override': false}} }}"
+    status_code: [200, 500]
+    return_content: true
+  register: s1id_activation
+  # The DC policy can only be activated after the AD learning phase ("AD Learning is IN_PROGRESS") – wait
+  until: s1id_activation.status == 200
+  retries: 30
+  delay: 30
+  changed_when: true
+
+- name: Check AD Secure EP
+  ansible.builtin.include_tasks: adsecure_ep.yml

@@ -1,0 +1,4 @@
+---
+# principal/target = sAMAccountName (group, user or computer$)
+vuln_acl_aces:
+  - { principal: GG_IT, target: svc.backup, rights: GenericWrite }

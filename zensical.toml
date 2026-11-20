@@ -1,0 +1,53 @@
+# Zensical configuration for the ai-range documentation site.
+# Build locally:  pip install zensical && zensical build   (output: site/, git-ignored)
+# Preview:        zensical serve
+# Reference:      https://zensical.org/docs/
+
+[project]
+site_name = "ai-range"
+site_description = "AI-driven purple-team lab on Proxmox: Red agent, Blue agent (SOC), Detection Engineer and a deterministic scorer."
+docs_dir = "docs"
+site_dir = "site"
+site_url = "https://driedener.github.io/ai-range/"
+repo_url = "https://github.com/driedener/ai-range"
+repo_name = "driedener/ai-range"
+edit_uri = "edit/main/docs/"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Prerequisites" = "prerequisites.md" },
+  { "Getting started" = "getting-started.md" },
+  { "Configuration" = "configuration.md" },
+  { "Templates (Packer)" = "packer.md" },
+  { "Ansible" = "ansible.md" },
+  { "Vulnerability profiles" = "vulnerability-profiles.md" },
+  { "Agents & scoring" = "agents.md" },
+  { "Elastic" = "elastic.md" },
+  { "SentinelOne" = "sentinelone.md" },
+  { "Reference" = "conventions.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+# Light/dark toggle, following the OS preference on first visit
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"

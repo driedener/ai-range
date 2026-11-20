@@ -1,0 +1,18 @@
+---
+elastic_agent_version: "{{ elastic_version }}"
+elastic_agent_fleet_url: "{{ fleet_url }}"
+elastic_agent_policy_id: "{{ 'range-windows' if 'windows' in group_names else 'range-linux' }}"
+elastic_agent_artifacts_url: https://artifacts.elastic.co/downloads/beats/elastic-agent
+
+# Fleet API (from the tools container)
+elastic_agent_kibana_url: "{{ kibana_url }}"
+elastic_agent_kibana_user: elastic
+elastic_agent_kibana_password: "{{ elastic_password }}"
+elastic_agent_kibana_ca: "{{ range_ca_cert }}"
+
+# Download/unpack directories on the hosts
+elastic_agent_win_tmp: C:\ProgramData\ai-range\elastic-agent
+elastic_agent_linux_tmp: /opt/ai-range/elastic-agent
+
+# Additional arguments for "elastic-agent install" (e.g. --tag=...)
+elastic_agent_install_extra_args: ""

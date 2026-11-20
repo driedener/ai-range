@@ -1,0 +1,4 @@
+---
+# Web server = Linux server with "web" in its name (lnx-web01), DB server = the other one
+vuln_linux_web: "{{ groups['linux_server'] | select('search', 'web') | first | default(groups['linux_server'][0]) }}"
+vuln_linux_db: "{{ groups['linux_server'] | reject('equalto', vuln_linux_web) | first | default(vuln_linux_web) }}"

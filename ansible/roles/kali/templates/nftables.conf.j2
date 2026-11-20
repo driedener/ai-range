@@ -1,0 +1,21 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# ai-range egress guard for the attacker: only range VLAN + internet.
+# Replies to incoming connections (Ansible/agents SSH from the controller) stay allowed.
+flush ruleset
+
+table inet airange_guard {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    ct state established,related accept
+    oif "lo" accept
+    # Gateway only for DNS
+    ip daddr {{ kali_guard_gateway }} udp dport 53 accept
+    ip daddr {{ kali_guard_gateway }} tcp dport 53 accept
+    ip daddr {{ kali_guard_gateway }} counter reject
+    ip daddr {{ kali_guard_allowed_cidr }} accept
+    # all other private networks (controller, Proxmox management, rest of the LAN)
+    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } counter reject
+    ip6 daddr { fc00::/7 } counter reject
+  }
+}

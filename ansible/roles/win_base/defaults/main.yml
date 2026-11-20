@@ -1,0 +1,41 @@
+---
+win_base_timezone: "{{ range_timezone_windows }}"
+win_base_transcript_dir: C:\PSTranscripts
+# Security event log size in bytes (512 MB)
+win_base_security_log_max_size: 536870912
+
+# Advanced Audit Policy (subcategories; English names = English OS template)
+win_base_audit_policy:
+  # Logon/Logoff
+  - { subcategory: Logon, audit_type: [success, failure] }
+  - { subcategory: Logoff, audit_type: [success] }
+  - { subcategory: Special Logon, audit_type: [success] }
+  - { subcategory: Account Lockout, audit_type: [failure] }
+  - { subcategory: Other Logon/Logoff Events, audit_type: [success, failure] }
+  # Account Logon (Kerberos/NTLM)
+  - { subcategory: Credential Validation, audit_type: [success, failure] }
+  - { subcategory: Kerberos Authentication Service, audit_type: [success, failure] }
+  - { subcategory: Kerberos Service Ticket Operations, audit_type: [success, failure] }
+  # Detailed Tracking
+  - { subcategory: Process Creation, audit_type: [success] }
+  # Account Management
+  - { subcategory: User Account Management, audit_type: [success, failure] }
+  - { subcategory: Security Group Management, audit_type: [success, failure] }
+  - { subcategory: Computer Account Management, audit_type: [success, failure] }
+  - { subcategory: Other Account Management Events, audit_type: [success, failure] }
+  # DS Access (only takes effect on DCs, harmless on members)
+  - { subcategory: Directory Service Access, audit_type: [success, failure] }
+  - { subcategory: Directory Service Changes, audit_type: [success] }
+  # Object Access (selective)
+  - { subcategory: File Share, audit_type: [success, failure] }
+  - { subcategory: Certification Services, audit_type: [success, failure] }
+  - { subcategory: Other Object Access Events, audit_type: [success, failure] }
+  # Policy Change / Privilege Use / System
+  - { subcategory: Audit Policy Change, audit_type: [success, failure] }
+  - { subcategory: Authentication Policy Change, audit_type: [success] }
+  - { subcategory: Sensitive Privilege Use, audit_type: [success, failure] }
+  - { subcategory: Security System Extension, audit_type: [success] }
+
+# Additional subcategories only for specific hosts (group_vars/host_vars),
+# e.g. "Detailed File Share" (5145) on DC/file server – too noisy on clients.
+win_base_audit_policy_extra: []

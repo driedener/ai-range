@@ -1,0 +1,38 @@
+---
+# Requires FS01 to be domain-joined (groups RANGE\GG_*).
+- name: Install file server role
+  ansible.windows.win_feature:
+    name: FS-FileServer
+    state: present
+
+- name: Create share root
+  ansible.windows.win_file:
+    path: "{{ fileserver_root }}"
+    state: directory
+
+- name: Create department folders
+  ansible.windows.win_file:
+    path: "{{ fileserver_root }}\\{{ item }}"
+    state: directory
+  loop: "{{ range_departments }}"
+
+- name: Department group gets Modify rights on its folder
+  ansible.windows.win_acl:
+    path: "{{ fileserver_root }}\\{{ item }}"
+    user: "{{ range_netbios }}\\{{ fileserver_group_prefix }}{{ item }}"
+    rights: Modify
+    type: allow
+    inherit: ContainerInherit, ObjectInherit
+    propagation: None
+    state: present
+  loop: "{{ range_departments }}"
+
+- name: Publish share \\FS01\Data
+  ansible.windows.win_share:
+    name: "{{ fileserver_share_name }}"
+    path: "{{ fileserver_root }}"
+    description: Department drives
+    full: "{{ range_netbios }}\\Domain Admins"
+    change: "{{ range_netbios }}\\Domain Users"
+    list: true
+    state: present

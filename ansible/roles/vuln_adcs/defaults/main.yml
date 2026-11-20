@@ -1,0 +1,4 @@
+---
+vuln_adcs_templates:
+  - { name: RangeUserAuth, display: Range User Authentication, enrollee_supplies_subject: true, users_can_write: false }   # ESC1
+  - { name: RangeVPN, display: Range VPN, enrollee_supplies_subject: false, users_can_write: true }                       # ESC4

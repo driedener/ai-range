@@ -1,0 +1,49 @@
+---
+# Active Directory: forest + objects on the DC, domain join, then server roles.
+# Target groups = services of the VMs in range.yaml (ca, web, fileserver, sql).
+- name: Forest and AD objects
+  hosts: dc
+  gather_facts: false
+  roles:
+    - ad_forest
+    - ad_objects
+
+- name: Domain join (servers and clients)
+  hosts: windows:!dc
+  gather_facts: false
+  roles:
+    - domain_join
+
+- name: ADCS Enterprise Root CA
+  hosts: ca
+  gather_facts: false
+  roles:
+    - adcs
+
+- name: WinRM over HTTPS on the DC (enterprise CA certificate, for SentinelOne Identity)
+  hosts: dc
+  gather_facts: false
+  tasks:
+    - name: WinRM HTTPS
+      ansible.builtin.import_role:
+        name: ad_objects
+        tasks_from: winrm_https
+      tags: [s1_identity]
+
+- name: IIS
+  hosts: web
+  gather_facts: false
+  roles:
+    - iis
+
+- name: Fileserver
+  hosts: fileserver
+  gather_facts: false
+  roles:
+    - fileserver
+
+- name: SQL Server (placeholder)
+  hosts: sql
+  gather_facts: false
+  roles:
+    - sql

@@ -1,0 +1,21 @@
+---
+# WinRM over HTTP (5985) with NTLM – pywinrm encrypts the messages
+# automatically (message encryption); Basic/unencrypted stays disabled.
+ansible_connection: winrm
+ansible_port: 5985
+ansible_winrm_scheme: http
+ansible_winrm_transport: ntlm
+ansible_winrm_message_encryption: auto
+ansible_winrm_server_cert_validation: ignore
+ansible_winrm_operation_timeout_sec: 60
+ansible_winrm_read_timeout_sec: 90
+
+# Local Administrator everywhere (from the Packer template). On DC01 it becomes
+# the domain administrator through forest creation (same password).
+ansible_user: Administrator
+ansible_password: "{{ range_admin_password }}"
+
+# Domain admin for actions on member servers that need domain rights
+# (domain join, enterprise CA). Corresponds to the former local admin on DC01.
+range_domain_admin_user: "Administrator@{{ range_domain }}"
+range_domain_admin_password: "{{ range_admin_password }}"

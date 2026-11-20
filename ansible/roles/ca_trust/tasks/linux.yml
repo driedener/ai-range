@@ -1,0 +1,16 @@
+---
+- name: Package ca-certificates installed
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: present
+  become: true
+
+- name: Place CA certificate
+  ansible.builtin.copy:
+    src: "{{ range_ca_cert }}"
+    dest: /usr/local/share/ca-certificates/ai-range-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Update CA certificates

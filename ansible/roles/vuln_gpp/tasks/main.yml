@@ -1,0 +1,40 @@
+---
+# Runs on the DC. GPP password (T1552.006): leftover of a group policy that used to deploy the local
+# support admin. Groups.xml with cpassword (AES-256, key published by Microsoft) sits in SYSVOL,
+# readable by all Domain Users. The GPO is not linked – it has no effect, but it reveals the
+# password of vuln_local_admin.
+- name: GPO with Groups.xml
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      GpoName: "{{ vuln_gpp_gpo_name }}"
+      User: "{{ vuln_local_admin_user }}"
+      Password: "{{ vuln_local_admin_password }}"
+    script: |
+      param([string]$GpoName, [string]$User, [string]$Password)
+      Import-Module GroupPolicy
+      $Ansible.Changed = $false
+      $gpo = Get-GPO -Name $GpoName -ErrorAction SilentlyContinue
+      if (-not $gpo) { $gpo = New-GPO -Name $GpoName -Comment 'Local support admin on clients (legacy)'; $Ansible.Changed = $true }
+      $dir = "$env:SystemRoot\SYSVOL\domain\Policies\{$($gpo.Id.ToString().ToUpper())}\Machine\Preferences\Groups"
+      $file = Join-Path $dir 'Groups.xml'
+
+      $key = [byte[]](0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,0xfa,0xf4,0x93,0x10,0x62,0x0f,0xfe,0xe8,
+                      0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,0x20,0x9b,0x09,0xa4,0x33,0xb6,0x6c,0x1b)
+      $aes = [Security.Cryptography.Aes]::Create()
+      $aes.Key = $key; $aes.IV = New-Object byte[] 16
+      $aes.Mode = 'CBC'; $aes.Padding = 'PKCS7'
+      $plain = [Text.Encoding]::Unicode.GetBytes($Password)
+      $cpw = [Convert]::ToBase64String($aes.CreateEncryptor().TransformFinalBlock($plain, 0, $plain.Length)).TrimEnd('=')
+
+      $xml = @"
+      <?xml version="1.0" encoding="utf-8"?>
+      <Groups clsid="{3125E937-EB16-4b4c-9934-544FC6D24D26}"><User clsid="{DF5F1855-51E5-4d24-8B1A-D9BDE98BA1D1}" name="$User" image="2" changed="2021-03-08 10:12:44" uid="{5B6D1A2E-6A0C-4C8B-9F0E-2C3D4E5F6A7B}"><Properties action="U" newName="" fullName="IT Support" description="Local support admin" cpassword="$cpw" changeLogon="0" noChange="1" neverExpires="1" acctDisabled="0" userName="$User"/></User></Groups>
+      "@
+      $xml = ($xml -split "`n" | ForEach-Object { $_.TrimStart() }) -join "`r`n"
+      $cur = if (Test-Path $file) { Get-Content $file -Raw } else { '' }
+      if ($cur.Trim() -ne $xml.Trim()) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -Path $file -Value $xml -Encoding UTF8
+        $Ansible.Changed = $true
+      }

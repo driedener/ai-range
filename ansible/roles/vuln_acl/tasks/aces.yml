@@ -1,0 +1,30 @@
+---
+# Set allow ACEs on AD objects (idempotent). Input: aces = [{principal, target, rights}],
+# principal/target as sAMAccountName (group, user or computer$). Also used by vuln_delegation.
+- name: Set ACEs
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Aces: "{{ aces | to_json }}"
+    script: |
+      param([string]$Aces)
+      Import-Module ActiveDirectory
+      $Ansible.Changed = $false
+      function Sid($r) { try { $r.Translate([Security.Principal.SecurityIdentifier]) } catch { $null } }
+      foreach ($a in ($Aces | ConvertFrom-Json)) {
+        $dn = (Get-ADObject -LDAPFilter "(sAMAccountName=$($a.target))").DistinguishedName
+        $sid = (Get-ADObject -LDAPFilter "(sAMAccountName=$($a.principal))" -Properties objectSid).objectSid
+        if (-not $dn -or -not $sid) { throw "Object not found: $($a.principal) -> $($a.target)" }
+        $acl = Get-Acl "AD:$dn"
+        # Bitmask instead of name: AD stores GenericWrite either split up (Self, WriteProperty) or combined
+        $mask = [int][System.DirectoryServices.ActiveDirectoryRights]$a.rights
+        $has = $acl.Access | Where-Object {
+          $_.AccessControlType -eq 'Allow' -and ([int]$_.ActiveDirectoryRights -band $mask) -eq $mask -and
+          (Sid $_.IdentityReference) -eq $sid }
+        if (-not $has) {
+          $acl.AddAccessRule((New-Object System.DirectoryServices.ActiveDirectoryAccessRule(
+            $sid, [System.DirectoryServices.ActiveDirectoryRights]$a.rights, 'Allow')))
+          Set-Acl -Path "AD:$dn" -AclObject $acl
+          $Ansible.Changed = $true
+        }
+      }

@@ -1,0 +1,20 @@
+{#- Projection of a Kibana role onto the fields we manage,
+    with sorted lists – for a stable desired/actual comparison. -#}
+{%- set es = r.elasticsearch | default({}) -%}
+{%- set out = {
+      'cluster': es.cluster | default([]) | sort,
+      'run_as': es.run_as | default([]) | sort,
+      'indices': [],
+      'kibana': []
+    } -%}
+{%- for i in es.indices | default([]) -%}
+{%-   set _ = out.indices.append({'names': i.names | sort, 'privileges': i.privileges | sort}) -%}
+{%- endfor -%}
+{%- for k in r.kibana | default([]) -%}
+{%-   set feat = {} -%}
+{%-   for fid, privs in (k.feature | default({})).items() -%}
+{%-     set _ = feat.update({fid: privs | sort}) -%}
+{%-   endfor -%}
+{%-   set _ = out.kibana.append({'base': k.base | default([]) | sort, 'feature': feat, 'spaces': k.spaces | default([]) | sort}) -%}
+{%- endfor -%}
+{{ out | to_json(sort_keys=True) }}

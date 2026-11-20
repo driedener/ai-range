@@ -1,0 +1,217 @@
+# ai-range - management stack on the controller
+# Start:   docker compose --env-file .env up -d
+# Tools:   docker compose --env-file .env run --rm tools <command>
+
+name: ai-range
+
+volumes:
+  certs:
+  esdata:
+  kibanadata:
+  fleetdata:
+
+services:
+  # One-off setup jobs (run again on every "up", idempotent):
+  # setup-certs: CA + certificates  ->  es01  ->  setup: kibana_system password  ->  kibana
+  setup-certs:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+    user: "0"
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - ./elastic/setup.sh:/setup.sh:ro
+    env_file:
+      - path: range.env      # from range.yaml (scripts/configure.py): CONTROLLER_IP …
+        required: true
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      KIBANA_PASSWORD: ${KIBANA_PASSWORD}
+    command: ["bash", "/setup.sh", "certs"]
+
+  setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+    user: "0"
+    depends_on:
+      es01:
+        condition: service_healthy
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - ./elastic/setup.sh:/setup.sh:ro
+    env_file:
+      - path: range.env      # from range.yaml (scripts/configure.py): CONTROLLER_IP …
+        required: true
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      KIBANA_PASSWORD: ${KIBANA_PASSWORD}
+    command: ["bash", "/setup.sh", "password"]
+
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+    depends_on:
+      setup-certs:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    environment:
+      node.name: es01
+      cluster.name: ai-range
+      discovery.type: single-node
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ES_JAVA_OPTS: -Xms${ES_HEAP} -Xmx${ES_HEAP}
+      bootstrap.memory_lock: "true"
+      xpack.license.self_generated.type: ${LICENSE}
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "true"
+      xpack.security.http.ssl.key: certs/es01/es01.key
+      xpack.security.http.ssl.certificate: certs/es01/es01.crt
+      xpack.security.http.ssl.certificate_authorities: certs/ca/ca.crt
+      xpack.security.transport.ssl.enabled: "true"
+      xpack.security.transport.ssl.key: certs/es01/es01.key
+      xpack.security.transport.ssl.certificate: certs/es01/es01.crt
+      xpack.security.transport.ssl.certificate_authorities: certs/ca/ca.crt
+      xpack.security.transport.ssl.verification_mode: certificate
+    mem_limit: ${ES_MEM_LIMIT}
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - certs:/usr/share/kibana/config/certs
+      - kibanadata:/usr/share/kibana/data
+      - ./elastic/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - "5601:5601"
+    env_file:
+      - path: range.env      # from range.yaml (scripts/configure.py): CONTROLLER_IP …
+        required: true
+    environment:
+      KIBANA_PASSWORD: ${KIBANA_PASSWORD}
+      KIBANA_ENCRYPTION_KEY: ${KIBANA_ENCRYPTION_KEY}
+    mem_limit: 2g
+    healthcheck:
+      # Kibana 9 speaks HTTP/2 over TLS ("HTTP/2 302") -> check the status code instead of the status line
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' --cacert config/certs/ca/ca.crt https://localhost:5601/api/status | grep -qE '^(200|401)$'"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  fleet-server:
+    image: docker.elastic.co/elastic-agent/elastic-agent:${ELASTIC_VERSION}
+    depends_on:
+      kibana:
+        condition: service_healthy
+    restart: unless-stopped
+    user: root
+    volumes:
+      - certs:/certs:ro
+      - fleetdata:/usr/share/elastic-agent/state
+    ports:
+      - "8220:8220"
+    environment:
+      # Own CA in addition to the system trust store (Go reads SSL_CERT_DIR)
+      SSL_CERT_DIR: /etc/ssl/certs:/certs/ca
+      FLEET_SERVER_ENABLE: "1"
+      FLEET_SERVER_POLICY_ID: fleet-server-policy
+      FLEET_SERVER_ELASTICSEARCH_HOST: https://es01:9200
+      FLEET_SERVER_ELASTICSEARCH_CA: /certs/ca/ca.crt
+      FLEET_SERVER_CERT: /certs/fleet-server/fleet-server.crt
+      FLEET_SERVER_CERT_KEY: /certs/fleet-server/fleet-server.key
+      FLEET_ENROLL: "1"
+      FLEET_URL: https://fleet-server:8220
+      FLEET_CA: /certs/ca/ca.crt
+      KIBANA_FLEET_SETUP: "1"
+      KIBANA_HOST: https://kibana:5601
+      KIBANA_FLEET_USERNAME: elastic
+      KIBANA_FLEET_PASSWORD: ${ELASTIC_PASSWORD}
+      KIBANA_FLEET_CA: /certs/ca/ca.crt
+    mem_limit: 1g
+
+  # Toolbox: terraform, packer, ansible - on demand only (profile "tools")
+  tools:
+    build: ./tools
+    init: true
+    profiles: ["tools"]
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - certs:/certs:ro
+    # Packer HTTP server (autoinstall/preseed) - only published with "run --service-ports"
+    ports:
+      - "8100-8110:8100-8110"
+    env_file:
+      - path: range.env      # from range.yaml (scripts/configure.py)
+        required: false
+    environment:
+      # Windows bind mount is world-writable -> ansible.cfg in the CWD would be ignored
+      ANSIBLE_CONFIG: /work/ansible/ansible.cfg
+      PROXMOX_VE_API_TOKEN: ${PROXMOX_VE_API_TOKEN}
+      PROXMOX_VE_INSECURE: ${PROXMOX_VE_INSECURE:-true}
+      ELASTIC_VERSION: ${ELASTIC_VERSION}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      RANGE_ADMIN_PASSWORD: ${RANGE_ADMIN_PASSWORD}
+      TF_VAR_linux_password: ${RANGE_ADMIN_PASSWORD}
+      RANGE_DSRM_PASSWORD: ${RANGE_DSRM_PASSWORD}
+      RANGE_USER_PASSWORD: ${RANGE_USER_PASSWORD}
+      RANGE_TIER0_PASSWORD: ${RANGE_TIER0_PASSWORD:-}
+      RANGE_BLUE_PASSWORD: ${RANGE_BLUE_PASSWORD}
+      RANGE_RED_PASSWORD: ${RANGE_RED_PASSWORD}
+      RANGE_ORCH_PASSWORD: ${RANGE_ORCH_PASSWORD}
+      # EDR of the range (elastic | sentinelone) + SentinelOne access for the agent installation
+      AIRANGE_EDR: ${AIRANGE_EDR:-elastic}
+      S1_CONSOLE_URL: ${S1_CONSOLE_URL:-}
+      S1_API_TOKEN: ${S1_API_TOKEN:-}
+      S1_SITE_ID: ${S1_SITE_ID:-}
+      S1_SITE_TOKEN: ${S1_SITE_TOKEN:-}
+      S1_AD_PASSWORD: ${S1_AD_PASSWORD:-}
+
+  # AI agents (Red/Blue/Engineer) + scorer. Usage:
+  #   docker compose --env-file .env run --rm agents <command>   (e.g. "exercise --scenario assumed-breach")
+  agents:
+    build: ../agents
+    init: true
+    profiles: ["agents"]
+    volumes:
+      - ../agents:/app            # code + scenarios + reports (reports/)
+      - ../range.yaml:/range.yaml:ro   # topology (hosts, network, controller)
+      - certs:/certs:ro
+    env_file:
+      - path: range.env      # from range.yaml (scripts/configure.py)
+        required: false
+    environment:
+      # LLM access: API key OR token from "claude setup-token" (subscription)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      AIRANGE_MODEL: ${AIRANGE_MODEL:-claude-opus-5-5}
+      AIRANGE_RED_MODEL: ${AIRANGE_RED_MODEL:-}
+      AIRANGE_BLUE_MODEL: ${AIRANGE_BLUE_MODEL:-}
+      AIRANGE_ENGINEER_MODEL: ${AIRANGE_ENGINEER_MODEL:-}
+      AIRANGE_MAX_BUDGET_USD: ${AIRANGE_MAX_BUDGET_USD:-5}
+      AIRANGE_RED_MAX_BUDGET_USD: ${AIRANGE_RED_MAX_BUDGET_USD:-10}
+      AIRANGE_BLUE_RESPONSE: ${AIRANGE_BLUE_RESPONSE:-auto}
+      AIRANGE_EXERCISE_MODE: ${AIRANGE_EXERCISE_MODE:-sequential}
+      RANGE_ADMIN_PASSWORD: ${RANGE_ADMIN_PASSWORD}
+      RANGE_USER_PASSWORD: ${RANGE_USER_PASSWORD}
+      RANGE_TIER0_PASSWORD: ${RANGE_TIER0_PASSWORD:-}
+      RANGE_BLUE_PASSWORD: ${RANGE_BLUE_PASSWORD}
+      RANGE_RED_PASSWORD: ${RANGE_RED_PASSWORD}
+      RANGE_ORCH_PASSWORD: ${RANGE_ORCH_PASSWORD}
+      PROXMOX_VE_API_TOKEN: ${PROXMOX_VE_API_TOKEN}
+      # Security platform for Blue/Engineer/Scorer: elastic | sentinelone
+      AIRANGE_EDR: ${AIRANGE_EDR:-elastic}
+      S1_CONSOLE_URL: ${S1_CONSOLE_URL:-}
+      S1_API_TOKEN: ${S1_API_TOKEN:-}
+      S1_ORCH_API_TOKEN: ${S1_ORCH_API_TOKEN:-}
+      S1_SITE_ID: ${S1_SITE_ID:-}

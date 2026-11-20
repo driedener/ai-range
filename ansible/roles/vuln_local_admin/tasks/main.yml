@@ -1,0 +1,65 @@
+---
+# Runs on the clients. Lateral movement (T1021.002/T1021.006) and LSA secrets (T1003.004):
+#  - Local admin "itsupport" with the same password on all clients (no LAPS), remote UAC filter off
+#  - First client: GG_IT (helpdesk) is local admin; a backup service runs as RANGE\svc.backup –
+#    so its password is stored on the host as an LSA secret (_SC_<service>)
+#  - File and printer sharing open in the firewall (SMB/RPC for psexec/wmiexec)
+- name: Local support admin
+  ansible.windows.win_user:
+    name: "{{ vuln_local_admin_user }}"
+    fullname: IT Support
+    password: "{{ vuln_local_admin_password }}"
+    update_password: always
+    password_never_expires: true
+    groups: [Administrators]
+    groups_action: add
+    state: present
+
+- name: Remote UAC off for local accounts (LocalAccountTokenFilterPolicy)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: LocalAccountTokenFilterPolicy
+    data: 1
+    type: dword
+
+- name: Firewall – file and printer sharing
+  ansible.windows.win_powershell:
+    script: |
+      $r = Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -ne 'True' }
+      $Ansible.Changed = [bool]$r
+      if ($r) { $r | Enable-NetFirewallRule }
+
+- name: First client – helpdesk as local admin, service with domain account
+  when: inventory_hostname == groups['client'][0]
+  block:
+    - name: GG_IT in Administrators
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members: ["{{ range_netbios }}\\GG_IT"]
+        state: present
+
+    - name: Password svc.backup in AD (same as in vuln_acl)
+      microsoft.ad.user:
+        identity: svc.backup
+        password: "{{ vuln_svc_passwords['svc.backup'] }}"
+        update_password: when_changed
+        state: present
+      delegate_to: "{{ groups['dc'][0] }}"
+
+    - name: Right "Log on as a service"
+      ansible.windows.win_user_right:
+        name: SeServiceLogonRight
+        users: ["{{ range_netbios }}\\svc.backup"]
+        action: add
+
+    - name: Backup agent service as svc.backup
+      ansible.windows.win_service:
+        name: RangeBackupAgent
+        display_name: Range Backup Agent
+        description: Nightly backup of user data
+        path: C:\Windows\System32\cmd.exe /c exit 0
+        username: "{{ range_netbios }}\\svc.backup"
+        password: "{{ vuln_svc_passwords['svc.backup'] }}"
+        update_password: on_create
+        start_mode: manual
+        state: stopped

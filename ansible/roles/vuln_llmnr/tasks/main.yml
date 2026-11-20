@@ -1,0 +1,48 @@
+---
+# Runs on the clients. LLMNR/NBT-NS poisoning (T1557.001):
+#  - LLMNR (multicast name resolution) not disabled by policy
+#  - Second client: a scheduled task running as a domain user accesses \\<typo>\scans every 5 min.
+#    DNS does not know the name -> LLMNR/NBT-NS broadcast -> Responder gets the NetNTLMv2 hash
+#    (password from rockyou).
+- name: LLMNR not disabled by policy
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient
+    name: EnableMulticast
+    state: absent
+
+- name: Victim task
+  when: inventory_hostname == vuln_llmnr_victim_host
+  block:
+    - name: Victim's password in AD
+      microsoft.ad.user:
+        identity: "{{ vuln_llmnr_user.sam }}"
+        password: "{{ vuln_llmnr_user.password }}"
+        update_password: when_changed
+        state: present
+      delegate_to: "{{ groups['dc'][0] }}"
+
+    - name: Right "Log on as a batch job"
+      ansible.windows.win_user_right:
+        name: SeBatchLogonRight
+        users: ["{{ range_netbios }}\\{{ vuln_llmnr_user.sam }}"]
+        action: add
+
+    - name: Scheduled task "Sync scanner folder"
+      community.windows.win_scheduled_task:
+        name: Sync scanner folder
+        description: Fetches scanned documents from the old scan server
+        actions:
+          - path: C:\Windows\System32\cmd.exe
+            arguments: /c dir \\{{ vuln_llmnr_bogus_host }}\scans
+        triggers:
+          - type: daily
+            start_boundary: "2026-01-01T00:00:00"
+            repetition:
+              interval: PT5M
+              duration: P1D
+        username: "{{ range_netbios }}\\{{ vuln_llmnr_user.sam }}"
+        password: "{{ vuln_llmnr_user.password }}"
+        logon_type: password
+        update_password: false
+        state: present
+        enabled: true

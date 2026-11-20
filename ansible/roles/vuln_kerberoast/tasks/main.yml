@@ -1,0 +1,32 @@
+---
+# Runs on the DC. Kerberoasting (T1558.003): SPNs on user service accounts. svc.sql has a password from
+# rockyou (crackable), svc.web a strong one (decoy). svc.sql is local admin on the SQL host (vulns.yml).
+- name: Password svc.sql
+  microsoft.ad.user:
+    identity: svc.sql
+    password: "{{ vuln_svc_passwords['svc.sql'] }}"
+    update_password: when_changed
+    state: present
+
+- name: Password svc.web
+  microsoft.ad.user:
+    identity: svc.web
+    password: "{{ vuln_svc_passwords['svc.web'] }}"
+    update_password: when_changed
+    state: present
+
+- name: Set SPNs
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Sam: "{{ item.sam }}"
+      Spns: "{{ item.spns }}"
+    script: |
+      param([string]$Sam, [string[]]$Spns)
+      $u = Get-ADUser $Sam -Properties servicePrincipalName
+      $missing = @($Spns | Where-Object { $u.servicePrincipalName -notcontains $_ })
+      $Ansible.Changed = $missing.Count -gt 0
+      if ($Ansible.Changed) { Set-ADUser $Sam -ServicePrincipalNames @{ Add = $missing } }
+  loop: "{{ vuln_kerberoast_spns }}"
+  loop_control:
+    label: "{{ item.sam }}"

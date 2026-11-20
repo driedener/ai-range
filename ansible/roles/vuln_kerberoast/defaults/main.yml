@@ -1,0 +1,7 @@
+---
+vuln_sql_host: "{{ groups['sql'][0] | lower }}.{{ range_domain }}"
+vuln_kerberoast_spns:
+  - sam: svc.sql
+    spns: ["MSSQLSvc/{{ vuln_sql_host }}:1433", "MSSQLSvc/{{ vuln_sql_host }}"]
+  - sam: svc.web
+    spns: ["HTTP/intranet.{{ range_domain }}"]

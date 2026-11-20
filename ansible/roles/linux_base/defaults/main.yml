@@ -1,0 +1,14 @@
+---
+linux_base_timezone: "{{ range_timezone_linux }}"
+linux_base_packages:
+  - ca-certificates
+  - curl
+  - jq
+  - unzip
+  - vim
+  - htop
+  - dnsutils
+  - net-tools
+# auditd conflicts with the auditd_manager integration (uses kernel audit directly)
+linux_base_absent_packages:
+  - auditd

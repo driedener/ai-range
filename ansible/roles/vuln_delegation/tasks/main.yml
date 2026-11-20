@@ -1,0 +1,38 @@
+---
+# Runs on the DC. Kerberos delegation (T1558, T1134.001):
+#  - Unconstrained delegation on the IIS host (TGTs of everyone who logs on end up in its memory)
+#  - svc.web: constrained delegation with protocol transition to cifs/<fileserver> (S4U2self/S4U2proxy)
+#  - GG_IT: GenericWrite on a client computer object => resource-based constrained delegation
+#    (msDS-AllowedToActOnBehalfOfOtherIdentity, MachineAccountQuota is the default 10)
+- name: Unconstrained delegation
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Computer: "{{ vuln_delegation_unconstrained }}"
+    script: |
+      param([string]$Computer)
+      $c = Get-ADComputer $Computer -Properties TrustedForDelegation
+      $Ansible.Changed = -not $c.TrustedForDelegation
+      if ($Ansible.Changed) { Set-ADComputer $Computer -TrustedForDelegation $true }
+
+- name: Constrained delegation with protocol transition
+  ansible.windows.win_powershell:
+    error_action: stop
+    parameters:
+      Sam: "{{ vuln_delegation_constrained.sam }}"
+      Spns: "{{ vuln_delegation_constrained.to }}"
+    script: |
+      param([string]$Sam, [string[]]$Spns)
+      $u = Get-ADUser $Sam -Properties 'msDS-AllowedToDelegateTo', TrustedToAuthForDelegation
+      [string[]]$missing = @($Spns | Where-Object { $u.'msDS-AllowedToDelegateTo' -notcontains $_ })
+      $Ansible.Changed = $false
+      if ($missing.Count) { Set-ADUser $Sam -Add @{ 'msDS-AllowedToDelegateTo' = $missing }; $Ansible.Changed = $true }
+      if (-not $u.TrustedToAuthForDelegation) {
+        Set-ADAccountControl -Identity $Sam -TrustedToAuthForDelegation $true; $Ansible.Changed = $true }
+
+- name: RBCD prerequisite (write right on computer object)
+  ansible.builtin.include_role:
+    name: vuln_acl
+    tasks_from: aces
+  vars:
+    aces: "{{ vuln_delegation_rbcd_aces }}"
