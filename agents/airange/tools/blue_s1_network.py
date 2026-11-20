@@ -22,11 +22,12 @@ from ..config import RANGE_HOSTS, settings
 from ..runner import make_tool
 from ..sentinelone import SentinelOne
 from ..topology import TOPOLOGY
-from ..uam import ACTION_STATUS, UAM, f_in
+from ..uam import ACTION_STATUS, ACTION_VERDICT, UAM, f_in
 from .blue import ToolError
 from .blue_s1 import _recommend, safe
 
 RULE_PREFIX = "ai-range blue: "
+CLEANUP_VERDICT = "TRUE_POSITIVE_BENIGN"   # verdict for alerts the cleanup closes without one
 DEVICE_ACTIONS = ["list", "isolate", "release"]
 FW_ACTIONS = ["status", "enable", "create_rule", "set_status", "delete_rule"]
 RELEASED_REVIEW = "Not Reviewed"
@@ -326,9 +327,20 @@ async def cleanup(s1: SentinelOne, dry_run: bool = False) -> dict:
             "filter": {"ids": [d["id"] for d in devices], **site}})
     if rules:
         await s1.api("DELETE", "/firewall-control", json={"filter": {**site, "ids": [r["id"] for r in rules]}})
+    # The console rejects RESOLVED ("Invalid argument") for alerts without an analyst verdict. Alerts that still
+    # have none get CLEANUP_VERDICT first (authorized test activity); verdicts set by Blue are left untouched.
     ids = [a["id"] for a in alerts]
+    no_verdict = {a["id"] for a in alerts if (a.get("analystVerdict") or "UNDEFINED") == "UNDEFINED"}
+    failed: list[str] = []
     for i in range(0, len(ids), 100):
-        await uam.trigger(ids[i:i + 100], [{"id": ACTION_STATUS, "payload": {"status": {"value": "RESOLVED"}}}])
+        chunk = ids[i:i + 100]
+        unset = [x for x in chunk if x in no_verdict]
+        if unset:
+            await uam.trigger(unset, [{"id": ACTION_VERDICT, "payload": {"analystVerdict": {"value": CLEANUP_VERDICT}}}])
+        res = await uam.trigger(chunk, [{"id": ACTION_STATUS, "payload": {"status": {"value": "RESOLVED"}}}])
+        failed += (res.get(ACTION_STATUS) or {}).get("failure", [])
+    if failed:
+        out["alerts_not_resolved"] = failed
     if incidents:
         await uam.incident_status([i["id"] for i in incidents], "RESOLVED")
     return out
